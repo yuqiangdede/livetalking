@@ -89,6 +89,7 @@ livetalking/
 - Sherpa 中文：`models/tts/sherpa-onnx-vits-zh-ll`
 - Sherpa 中英：`models/tts/vits-melo-tts-zh_en`
 - 头像：`data/avatars/<avatar_id>/`
+- `.pt`、`.pth`、`.onnx` 权重文件通过 Git LFS 管理
 
 ## 前端入口
 
