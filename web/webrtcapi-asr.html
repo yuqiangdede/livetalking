@@ -30,6 +30,7 @@
                 linear-gradient(180deg, #f5f8fa 0%, var(--bg) 100%);
             color: var(--text);
             min-height: 100vh;
+            overflow: hidden;
         }
 
         .page {
@@ -39,7 +40,8 @@
             grid-template-columns: minmax(360px, 1.05fr) minmax(380px, 1.15fr);
             gap: 14px;
             align-items: start;
-            min-height: calc(100vh - 24px);
+            height: calc(100vh - 24px);
+            min-height: 0;
         }
 
         .panel {
@@ -48,18 +50,29 @@
             border-radius: 24px;
             box-shadow: 0 12px 30px rgba(15, 23, 42, 0.07);
             overflow: hidden;
-            min-height: calc(100vh - 24px);
+            height: calc(100vh - 24px);
+            min-height: 0;
         }
 
         .panel-body {
             padding: 16px 18px 18px;
             height: 100%;
+            box-sizing: border-box;
+            min-height: 0;
+        }
+
+        .video-panel .panel-body {
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            gap: 0;
+            padding: 8px;
         }
 
         .hero {
             display: flex;
             justify-content: space-between;
-            align-items: flex-start;
+            align-items: center;
             gap: 16px;
             margin-bottom: 16px;
         }
@@ -68,6 +81,19 @@
             display: flex;
             flex-direction: column;
             gap: 4px;
+            flex: 0 0 auto;
+        }
+
+        .hero-status {
+            flex: 1 1 auto;
+            min-width: 0;
+            text-align: center;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.2;
         }
 
         .hero-side {
@@ -76,6 +102,44 @@
             gap: 12px;
             flex-wrap: wrap;
             justify-content: flex-end;
+            flex: 0 0 auto;
+        }
+
+        .right-hero {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            justify-content: space-between;
+            flex-wrap: nowrap;
+            margin-bottom: 10px;
+            min-width: 0;
+            padding-right: 2px;
+        }
+
+        .right-hero-title {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            min-width: 0;
+            flex: 1 1 auto;
+            white-space: nowrap;
+        }
+
+        .right-hero-title h1 {
+            margin: 0;
+            font-size: 28px;
+            line-height: 1.1;
+            flex: 0 0 auto;
+        }
+
+        .right-hero-controls {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: nowrap;
+            justify-content: flex-end;
+            flex: 0 0 auto;
+            white-space: nowrap;
         }
 
         .modal-backdrop {
@@ -156,6 +220,55 @@
             margin-top: 12px;
         }
 
+        .generation-modal {
+            width: min(760px, 100%);
+        }
+
+        .generation-summary {
+            display: grid;
+            gap: 10px;
+        }
+
+        .generation-progress-head {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            align-items: center;
+            font-size: 13px;
+            color: var(--muted);
+        }
+
+        .generation-progress-track {
+            height: 12px;
+            border-radius: 999px;
+            background: #e7eef3;
+            overflow: hidden;
+            border: 1px solid #d8e2ea;
+        }
+
+        .generation-progress-bar {
+            height: 100%;
+            width: 0%;
+            border-radius: 999px;
+            background: linear-gradient(90deg, #0f766e 0%, #14b8a6 100%);
+            transition: width 0.25s ease;
+        }
+
+        .generation-log {
+            margin: 0;
+            padding: 12px;
+            min-height: 220px;
+            max-height: 320px;
+            overflow: auto;
+            border-radius: 16px;
+            background: #0b1220;
+            color: #d7e5f0;
+            font-size: 12px;
+            line-height: 1.55;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
         .hero h1 {
             margin: 0;
             font-size: 30px;
@@ -169,11 +282,11 @@
         }
 
         .badge {
-            padding: 8px 12px;
+            padding: 6px 10px;
             border-radius: 999px;
             background: rgba(15, 118, 110, 0.10);
             color: var(--brand-dark);
-            font-size: 12px;
+            font-size: 11px;
             white-space: nowrap;
         }
 
@@ -185,14 +298,19 @@
         .video-shell {
             background: linear-gradient(160deg, #0f172a 0%, #14263b 100%);
             border-radius: 24px;
-            padding: 14px;
-            margin-bottom: 16px;
+            padding: 8px;
+            margin-bottom: 0;
+            flex: 1 1 auto;
+            min-height: 0;
+            display: flex;
         }
 
         video {
             width: 100%;
-            aspect-ratio: 1 / 1;
-            min-height: 420px;
+            height: 100%;
+            min-height: 0;
+            aspect-ratio: auto;
+            object-fit: contain;
             border-radius: 18px;
             display: block;
             background: #020617;
@@ -228,11 +346,11 @@
             border: 1px solid var(--line);
             border-radius: 16px;
             background: var(--surface);
-            padding: 14px;
+            padding: 10px;
         }
 
         .section + .section {
-            margin-top: 14px;
+            margin-top: 10px;
         }
 
         .section-header {
@@ -240,7 +358,7 @@
             justify-content: space-between;
             align-items: center;
             gap: 12px;
-            margin-bottom: 12px;
+            margin-bottom: 8px;
         }
 
         .section-title {
@@ -254,10 +372,16 @@
         }
 
         .table-wrap {
-            overflow: auto;
+            overflow: visible;
             border: 1px solid var(--line);
             border-radius: 14px;
             background: #fff;
+        }
+
+        .scrollable-table-wrap {
+            max-height: 360px;
+            overflow: auto;
+            scrollbar-gutter: stable;
         }
 
         .data-table {
@@ -294,6 +418,53 @@
             background: rgba(15, 118, 110, 0.10);
         }
 
+        #avatar-material-table tbody tr {
+            cursor: default;
+        }
+
+        .avatar-material-thumb {
+            width: 112px;
+        }
+
+        .avatar-material-thumb img {
+            display: block;
+            width: 96px;
+            height: 96px;
+            object-fit: contain;
+            border-radius: 14px;
+            background: #f1f5f9;
+            border: 1px solid rgba(15, 23, 42, 0.08);
+        }
+
+        .settings-modal {
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .settings-modal .modal-body {
+            flex: 1;
+            min-height: 0;
+            overflow: hidden;
+        }
+
+        .settings-modal .tab-panel {
+            min-height: 0;
+        }
+
+        .avatar-material-thumb .thumb-fallback {
+            width: 96px;
+            height: 96px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 14px;
+            background: #f1f5f9;
+            border: 1px dashed rgba(15, 23, 42, 0.14);
+            color: var(--muted);
+            font-size: 12px;
+        }
+
         .avatar-status {
             display: inline-flex;
             align-items: center;
@@ -303,6 +474,41 @@
             color: var(--brand-dark);
             font-size: 12px;
             white-space: nowrap;
+        }
+
+        .avatar-material-preview {
+            position: fixed;
+            z-index: 80;
+            display: none;
+            min-width: 220px;
+            max-width: 340px;
+            padding: 10px;
+            border-radius: 18px;
+            background: rgba(8, 15, 28, 0.96);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
+            pointer-events: none;
+            color: #e6eef7;
+        }
+
+        .avatar-material-preview.open {
+            display: block;
+        }
+
+        .avatar-material-preview img {
+            display: block;
+            width: 100%;
+            max-height: 280px;
+            object-fit: contain;
+            border-radius: 12px;
+            background: #0f172a;
+        }
+
+        .avatar-material-preview .caption {
+            margin-top: 8px;
+            font-size: 12px;
+            color: rgba(230, 238, 247, 0.82);
+            word-break: break-all;
         }
 
         .toolbar,
@@ -329,6 +535,13 @@
             border: 0;
             border-radius: 12px;
             font-size: 14px;
+        }
+
+        input[type="file"] {
+            width: 100%;
+            padding: 10px 12px;
+            background: #fff;
+            border: 1px solid var(--line);
         }
 
         button {
@@ -412,6 +625,24 @@
             grid-template-columns: repeat(3, minmax(0, 1fr));
         }
 
+        .material-create-grid {
+            display: grid;
+            grid-template-columns: minmax(180px, 1fr) minmax(240px, 1.5fr) auto;
+            gap: 12px;
+            align-items: end;
+        }
+
+        .material-create-actions {
+            display: flex;
+            gap: 10px;
+            align-items: end;
+            flex-wrap: wrap;
+        }
+
+        .material-create-actions button {
+            white-space: nowrap;
+        }
+
         .grid-1 {
             display: grid;
             grid-template-columns: 1fr;
@@ -443,10 +674,12 @@
         .dialog-log {
             display: flex;
             flex-direction: column;
-            gap: 10px;
-            max-height: 280px;
+            gap: 8px;
+            flex: 1 1 auto;
+            min-height: 0;
+            max-height: none;
             overflow: auto;
-            padding: 10px 12px;
+            padding: 8px 10px;
             border-radius: 14px;
             background: #fff;
             border: 1px solid var(--line);
@@ -482,7 +715,7 @@
         }
 
         .dialog-item {
-            padding: 10px 12px;
+            padding: 8px 10px;
             border-radius: 12px;
             border: 1px solid var(--line);
             background: #f9fbfc;
@@ -501,24 +734,37 @@
             display: flex;
             justify-content: space-between;
             gap: 10px;
-            font-size: 12px;
+            font-size: 11px;
             color: var(--muted);
-            margin-bottom: 6px;
+            margin-bottom: 4px;
         }
 
         .dialog-text {
             white-space: pre-wrap;
-            line-height: 1.55;
+            line-height: 1.4;
             word-break: break-word;
+            font-size: 13px;
         }
 
         .panel-scroll {
             display: flex;
             flex-direction: column;
-            gap: 14px;
-            max-height: calc(100vh - 64px);
-            overflow: auto;
-            padding-right: 4px;
+            gap: 10px;
+            max-height: none;
+            overflow: hidden;
+            padding-right: 0;
+        }
+
+        .panel-scroll > .section:last-child {
+            display: flex;
+            flex: 1 1 auto;
+            min-height: 0;
+            flex-direction: column;
+        }
+
+        .panel-scroll > .section:last-child .dialog-log {
+            flex: 1 1 auto;
+            min-height: 0;
         }
 
         details {
@@ -601,39 +847,49 @@
             .grid-3 {
                 grid-template-columns: 1fr;
             }
+
+            .material-create-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .material-create-actions {
+                width: 100%;
+            }
+
+            .material-create-actions button {
+                flex: 1 1 0;
+            }
         }
     </style>
 </head>
 <body>
 <div class="page">
-    <div class="panel sticky">
+    <div class="panel sticky video-panel">
         <div class="panel-body">
-            <div class="hero">
-                <div class="hero-title">
-                    <h1>数字人</h1>
-                </div>
-                <div class="hero-side">
-                    <label style="display:flex;align-items:center;gap:8px;margin:0;">
-                        <input id="use-stun" type="checkbox"/>
-                        <span>使用 STUN 服务器</span>
-                    </label>
-                    <button id="open-settings" class="ghost" type="button">设置</button>
-                    <div class="badge" id="connection-badge">未连接</div>
-                </div>
-            </div>
-
             <div class="video-shell">
                 <audio id="audio" autoplay="true"></audio>
                 <video id="video" autoplay="true" playsinline="true" muted></video>
             </div>
-
-            <div class="status" id="status">页面加载后会自动连接 WebRTC。</div>
 
         </div>
     </div>
 
     <div class="panel">
         <div class="panel-body panel-scroll">
+            <div class="right-hero">
+                <div class="right-hero-title">
+                    <h1>数字人</h1>
+                    <div class="hero-status" id="connection-status" title="WebRTC connected. You can record, upload audio, or type text.">WebRTC connected. You can record, upload audio, or type text.</div>
+                </div>
+                <div class="right-hero-controls">
+                    <label style="display:flex;align-items:center;gap:8px;margin:0;">
+                        <input id="use-stun" type="checkbox"/>
+                        <span>开启网络</span>
+                    </label>
+                    <button id="open-settings" class="ghost" type="button">设置</button>
+                </div>
+            </div>
+
             <div class="section">
                 <div class="section-header">
                     <h2 class="section-title">输入</h2>
@@ -676,7 +932,7 @@
 <input type="hidden" id="sessionid" value="0">
 
 <div id="settings-backdrop" class="modal-backdrop" aria-hidden="true">
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <div class="modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
         <div class="modal-header">
             <h2 class="modal-title" id="settings-title">ASR / TTS / LLM 设置</h2>
             <button id="close-settings" class="ghost" type="button">关闭</button>
@@ -686,6 +942,7 @@
                 <button class="tab-button active" type="button" data-tab="tts">TTS</button>
                 <button class="tab-button" type="button" data-tab="asr">ASR</button>
                 <button class="tab-button" type="button" data-tab="avatars">avatars</button>
+                <button class="tab-button" type="button" data-tab="materials">素材管理</button>
                 <button class="tab-button" type="button" data-tab="llm">LLM</button>
             </div>
 
@@ -769,14 +1026,14 @@
             <div class="tab-panel" data-panel="avatars">
                 <div class="section-note" id="avatar-model-note"></div>
                 <div class="section-note" style="margin-top:12px;">
-                    静默门腔会跟随每个 avatar 保存。不勾选时，静默默认播放视频帧，适合没有说话的视频素材。勾选后，静默默认固定在静止画面，适合说话视频素材。
+                    静默门腔会跟随每个 avatar 保存。不勾选时，静默默认播放视频帧，适合没有说话的视频素材。勾选后，静默默认固定在静止画面，适合说话视频素材。悬浮头像行可预览首图。
                 </div>
                 <div style="margin-top:14px;">
                     <div class="section-header">
                         <h3 class="section-title" style="margin:0;">avatars</h3>
                         <div class="section-note">选择当前使用的头像模型</div>
                     </div>
-                    <div class="table-wrap">
+                    <div class="table-wrap scrollable-table-wrap">
                         <table class="data-table" id="avatar-table">
                             <thead>
                                 <tr>
@@ -787,6 +1044,53 @@
                                 </tr>
                             </thead>
                             <tbody id="avatar-table-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tab-panel" data-panel="materials">
+                <div class="section-note" id="avatar-material-note"></div>
+                <div class="section-note" style="margin-top:12px;">
+                    输入素材名后上传 mp4，系统会调用本地 `.venv` 中的 Python 生成 `data/avatars/<素材名>`。删除当前正在使用的素材会被拒绝。
+                </div>
+                <div class="section" style="margin-top:14px;">
+                    <div class="section-header">
+                        <h3 class="section-title" style="margin:0;">创建素材</h3>
+                        <div class="section-note">素材名会自动建议为下一个可用的 avatar_x</div>
+                    </div>
+                    <div class="material-create-grid">
+                        <div>
+                            <label for="avatar-material-name">素材名</label>
+                            <input id="avatar-material-name" type="text" placeholder="avatar_1"/>
+                        </div>
+                        <div>
+                            <label for="avatar-material-file">MP4 文件</label>
+                            <input id="avatar-material-file" type="file" accept=".mp4,video/mp4"/>
+                        </div>
+                        <div class="material-create-actions">
+                            <button id="reload-avatar-materials" class="ghost" type="button">刷新列表</button>
+                            <button id="create-avatar-material" type="button">生成素材</button>
+                        </div>
+                    </div>
+                    <div class="section-note" style="margin-top:10px;" id="avatar-material-file-name">未选择文件</div>
+                </div>
+                <div class="section" style="margin-top:14px;">
+                    <div class="section-header">
+                        <h3 class="section-title" style="margin:0;">素材列表</h3>
+                        <div class="section-note">显示当前可用素材和删除入口</div>
+                    </div>
+                    <div class="table-wrap scrollable-table-wrap">
+                        <table class="data-table" id="avatar-material-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 120px;">缩略图</th>
+                                    <th>素材名</th>
+                                    <th style="width: 160px;">状态</th>
+                                    <th style="width: 180px;">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="avatar-material-table-body"></tbody>
                         </table>
                     </div>
                 </div>
@@ -834,6 +1138,41 @@
     </div>
 </div>
 
+<div id="avatar-generation-backdrop" class="modal-backdrop" aria-hidden="true">
+    <div class="modal generation-modal" role="dialog" aria-modal="true" aria-labelledby="avatar-generation-title">
+        <div class="modal-header">
+            <h2 class="modal-title" id="avatar-generation-title">素材生成进度</h2>
+            <button id="close-avatar-generation" class="ghost" type="button">关闭</button>
+        </div>
+        <div class="modal-body">
+            <div class="section-note" id="avatar-generation-summary"></div>
+            <div class="generation-summary" style="margin-top:12px;">
+                <div>
+                    <div class="generation-progress-head">
+                        <span id="avatar-generation-phase">等待开始</span>
+                        <span id="avatar-generation-percent">0%</span>
+                    </div>
+                    <div class="generation-progress-track" style="margin-top:8px;">
+                        <div id="avatar-generation-bar" class="generation-progress-bar"></div>
+                    </div>
+                </div>
+                <div class="section-note" id="avatar-generation-message"></div>
+            </div>
+            <div style="margin-top:12px;">
+                <pre id="avatar-generation-log" class="generation-log"></pre>
+            </div>
+            <div class="modal-actions" style="margin-top:14px;">
+                <button id="confirm-avatar-generation" type="button" style="display:none;">切换并保存</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="avatar-material-preview" class="avatar-material-preview" aria-hidden="true">
+    <img id="avatar-material-preview-img" alt="素材缩略图"/>
+    <div id="avatar-material-preview-caption" class="caption"></div>
+</div>
+
 <script src="client.js"></script>
 <script>
 let mediaRecorder = null;
@@ -845,15 +1184,26 @@ let pendingInputMeta = {};
 let dialogPollTimer = null;
 let autoConnectTriggered = false;
 let continuousDialogueEnabled = false;
+let avatarGenerationPollTimer = null;
+let avatarGenerationActiveJobId = '';
+let avatarGenerationBusy = false;
+let avatarMaterialPreviewHoverTimer = null;
 
 const CONTINUOUS_DIALOGUE_STORAGE_KEY = 'livetalking.continuousDialogueEnabled';
 
 function updateStatus(text) {
-    document.getElementById('status').textContent = text;
+    void text;
 }
 
 function setConnectionBadge(text) {
     document.getElementById('connection-badge').textContent = text;
+}
+
+function setConnectionStatus(text) {
+    const node = document.getElementById('connection-status');
+    if (node) {
+        node.textContent = text || '';
+    }
 }
 
 function currentSessionId() {
@@ -1034,6 +1384,9 @@ function openSettingsModal() {
     backdrop.classList.add('open');
     backdrop.setAttribute('aria-hidden', 'false');
     switchSettingsTab('tts');
+    loadAvatarMaterials().catch((error) => {
+        updateStatus(`加载素材列表失败：${error}`);
+    });
 }
 
 function closeSettingsModal() {
@@ -1049,6 +1402,459 @@ function switchSettingsTab(tabName) {
     document.querySelectorAll('.tab-panel').forEach((panel) => {
         panel.classList.toggle('active', panel.dataset.panel === tabName);
     });
+    if (tabName === 'materials') {
+        syncAvatarMaterialName();
+        renderAvatarMaterialsTable();
+    }
+}
+
+function getAvatarIdSuggestions(items) {
+    let maxSuffix = 0;
+    (Array.isArray(items) ? items : []).forEach((item) => {
+        const avatarId = String(item && item.id ? item.id : '').trim();
+        const match = avatarId.match(/^avatar_(\d+)$/);
+        if (match) {
+            maxSuffix = Math.max(maxSuffix, parseInt(match[1], 10));
+        }
+    });
+    return `avatar_${maxSuffix + 1}`;
+}
+
+function syncAvatarMaterialName(force = false) {
+    const input = document.getElementById('avatar-material-name');
+    if (!input) {
+        return;
+    }
+    const suggested = getAvatarIdSuggestions(avatarOptionsCache);
+    const hasCustomValue = Boolean(String(input.value || '').trim());
+    if (force || !hasCustomValue || input.dataset.autoFilled === '1') {
+        input.value = suggested;
+        input.dataset.autoFilled = '1';
+    }
+}
+
+function updateAvatarMaterialNote(text) {
+    const note = document.getElementById('avatar-material-note');
+    if (note) {
+        note.textContent = text || '';
+    }
+}
+
+function getAvatarMaterialPreviewNodes() {
+    return {
+        panel: document.getElementById('avatar-material-preview'),
+        image: document.getElementById('avatar-material-preview-img'),
+        caption: document.getElementById('avatar-material-preview-caption')
+    };
+}
+
+function hideAvatarMaterialPreview() {
+    const nodes = getAvatarMaterialPreviewNodes();
+    if (avatarMaterialPreviewHoverTimer) {
+        clearTimeout(avatarMaterialPreviewHoverTimer);
+        avatarMaterialPreviewHoverTimer = null;
+    }
+    if (!nodes.panel) {
+        return;
+    }
+    nodes.panel.classList.remove('open');
+    nodes.panel.setAttribute('aria-hidden', 'true');
+}
+
+function positionAvatarMaterialPreview(panel, event) {
+    if (!panel || !event) {
+        return;
+    }
+    const margin = 18;
+    const padding = 12;
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const rect = panel.getBoundingClientRect();
+    let left = event.clientX + margin;
+    let top = event.clientY + margin;
+    if (left + rect.width > viewportWidth - padding) {
+        left = Math.max(padding, event.clientX - rect.width - margin);
+    }
+    if (top + rect.height > viewportHeight - padding) {
+        top = Math.max(padding, event.clientY - rect.height - margin);
+    }
+    panel.style.left = `${Math.max(padding, left)}px`;
+    panel.style.top = `${Math.max(padding, top)}px`;
+}
+
+function showAvatarMaterialPreview(item, event, captionPrefix = '素材') {
+    const nodes = getAvatarMaterialPreviewNodes();
+    if (!nodes.panel || !nodes.image || !nodes.caption || !item) {
+        return;
+    }
+    const thumbnailUrl = String(item.thumbnail_url || '');
+    if (!thumbnailUrl) {
+        return;
+    }
+    if (avatarMaterialPreviewHoverTimer) {
+        clearTimeout(avatarMaterialPreviewHoverTimer);
+        avatarMaterialPreviewHoverTimer = null;
+    }
+    nodes.image.src = thumbnailUrl;
+    nodes.image.alt = `${captionPrefix} ${item.id || ''} 缩略图`;
+    nodes.caption.textContent = `${captionPrefix} ${item.id || ''} · 鼠标移出关闭预览`;
+    nodes.panel.classList.add('open');
+    nodes.panel.setAttribute('aria-hidden', 'false');
+    positionAvatarMaterialPreview(nodes.panel, event);
+}
+
+function showAvatarSelectionPreview(item, event) {
+    showAvatarMaterialPreview(item, event, '头像');
+}
+
+function scheduleHideAvatarMaterialPreview(delay = 120) {
+    if (avatarMaterialPreviewHoverTimer) {
+        clearTimeout(avatarMaterialPreviewHoverTimer);
+    }
+    avatarMaterialPreviewHoverTimer = window.setTimeout(() => {
+        hideAvatarMaterialPreview();
+    }, delay);
+}
+
+function renderAvatarMaterialsTable() {
+    const tbody = document.getElementById('avatar-material-table-body');
+    if (!tbody) {
+        return;
+    }
+    const avatars = Array.isArray(avatarOptionsCache) ? avatarOptionsCache : [];
+    const currentAvatarId = currentAvatarIdCache || (avatars[0] && avatars[0].id) || '';
+
+    if (!avatars.length) {
+        tbody.innerHTML = '<tr><td colspan="4">No avatar materials found</td></tr>';
+        updateAvatarMaterialNote('当前没有可用素材。');
+        return;
+    }
+
+    updateAvatarMaterialNote(`当前使用：${currentAvatarId || '未选择'}，鼠标悬浮可查看全图缩略图，建议下一个素材名：${getAvatarIdSuggestions(avatars)}`);
+    tbody.innerHTML = avatars.map((item) => {
+        const avatarId = item.id || '';
+        const selected = avatarId === currentAvatarId;
+        const thumbnailUrl = item.thumbnail_url || '';
+        return `
+            <tr class="${selected ? 'selected' : ''}" data-avatar-id="${avatarId}" data-thumbnail-url="${item.thumbnail_url || ''}">
+                <td class="avatar-material-thumb">
+                    ${thumbnailUrl ? `<img src="${thumbnailUrl}" alt="${avatarId} 缩略图" loading="lazy"/>` : '<div class="thumb-fallback">无缩略图</div>'}
+                </td>
+                <td>${avatarId}</td>
+                <td><span class="avatar-status">${selected ? 'current' : 'available'}</span></td>
+                <td>
+                    <button type="button" class="ghost delete-avatar-material" data-avatar-id="${avatarId}" ${selected ? 'disabled' : ''}>删除</button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+
+    tbody.querySelectorAll('button.delete-avatar-material').forEach((button) => {
+        button.addEventListener('click', async (event) => {
+            event.stopPropagation();
+            const avatarId = button.dataset.avatarId || '';
+            if (!avatarId) {
+                return;
+            }
+            try {
+                await deleteAvatarMaterial(avatarId);
+            } catch (error) {
+                updateStatus(`删除素材失败：${error}`);
+            }
+        });
+    });
+
+    tbody.querySelectorAll('tr[data-avatar-id]').forEach((row) => {
+        const avatarId = row.dataset.avatarId || '';
+        const item = avatars.find((entry) => String(entry.id || '') === avatarId);
+        if (!item) {
+            return;
+        }
+        row.addEventListener('mouseenter', (event) => {
+            showAvatarMaterialPreview(item, event);
+        });
+        row.addEventListener('mousemove', (event) => {
+            const nodes = getAvatarMaterialPreviewNodes();
+            if (nodes.panel && nodes.panel.classList.contains('open')) {
+                positionAvatarMaterialPreview(nodes.panel, event);
+            }
+        });
+        row.addEventListener('mouseleave', () => {
+            scheduleHideAvatarMaterialPreview();
+        });
+    });
+}
+
+async function loadAvatarMaterials(options = {}) {
+    const updateCurrent = Boolean(options.updateCurrent);
+    const response = await fetch('/api/avatar-materials');
+    const result = await response.json();
+    if (result.code !== 0) {
+        throw new Error(result.msg || '加载素材列表失败');
+    }
+    const data = result.data || {};
+    avatarOptionsCache = Array.isArray(data.avatar_options) ? data.avatar_options : [];
+    avatarSilenceGateCache = {};
+    avatarOptionsCache.forEach((item) => {
+        if (item && item.id) {
+            avatarSilenceGateCache[item.id] = Boolean(item.silence_gate_enabled);
+        }
+    });
+    if (updateCurrent || !currentAvatarIdCache) {
+        currentAvatarIdCache = String(data.current_avatar_id || currentAvatarIdCache || '');
+    }
+    syncAvatarMaterialName();
+    renderAvatarTable();
+    renderAvatarMaterialsTable();
+    updateSettingsSummary(
+        document.getElementById('tts-engine') ? document.getElementById('tts-engine').value : 'vits_zh',
+        document.getElementById('llm-provider') ? document.getElementById('llm-provider').value : 'openai_chat',
+        currentAvatarIdCache
+    );
+    return data;
+}
+
+function getAvatarGenerationModalNodes() {
+    return {
+        backdrop: document.getElementById('avatar-generation-backdrop'),
+        summary: document.getElementById('avatar-generation-summary'),
+        phase: document.getElementById('avatar-generation-phase'),
+        percent: document.getElementById('avatar-generation-percent'),
+        bar: document.getElementById('avatar-generation-bar'),
+        message: document.getElementById('avatar-generation-message'),
+        log: document.getElementById('avatar-generation-log'),
+        closeButton: document.getElementById('close-avatar-generation'),
+        confirmButton: document.getElementById('confirm-avatar-generation')
+    };
+}
+
+function renderAvatarGenerationJob(job) {
+    const nodes = getAvatarGenerationModalNodes();
+    if (!nodes.backdrop || !nodes.phase || !nodes.percent || !nodes.bar || !nodes.message || !nodes.log) {
+        return;
+    }
+    const avatarId = String(job && job.avatar_id ? job.avatar_id : avatarGenerationActiveJobId || '');
+    const status = String(job && job.status ? job.status : 'queued');
+    const phase = String(job && job.phase ? job.phase : '等待开始');
+    const progress = Number.isFinite(Number(job && job.progress)) ? Math.max(0, Math.min(100, Number(job.progress))) : 0;
+    const message = String(job && job.message ? job.message : '');
+    const logTail = Array.isArray(job && job.log_tail) ? job.log_tail : [];
+
+    if (nodes.summary) {
+        nodes.summary.textContent = `素材 ${avatarId || ''} 正在生成。任务状态：${status}`;
+    }
+    nodes.phase.textContent = phase;
+    nodes.percent.textContent = `${Math.round(progress)}%`;
+    nodes.bar.style.width = `${Math.round(progress)}%`;
+    nodes.message.textContent = message || (status === 'running' ? '正在处理中，请稍候。' : '');
+    nodes.log.textContent = logTail.length ? logTail.join('\n') : '等待输出日志...';
+
+    if (nodes.closeButton) {
+        nodes.closeButton.disabled = status === 'running';
+    }
+    if (nodes.confirmButton) {
+        nodes.confirmButton.style.display = status === 'success' ? '' : 'none';
+        nodes.confirmButton.disabled = status !== 'success';
+    }
+}
+
+function openAvatarGenerationModal(job) {
+    const nodes = getAvatarGenerationModalNodes();
+    if (!nodes.backdrop) {
+        return;
+    }
+    avatarGenerationActiveJobId = String(job && job.job_id ? job.job_id : '');
+    nodes.backdrop.classList.add('open');
+    nodes.backdrop.setAttribute('aria-hidden', 'false');
+    renderAvatarGenerationJob(job || {});
+}
+
+function closeAvatarGenerationModal(force = false) {
+    const nodes = getAvatarGenerationModalNodes();
+    if (!nodes.backdrop) {
+        return;
+    }
+    const currentJob = avatarGenerationActiveJobId ? avatarGenerationCurrentSnapshot : null;
+    if (!force && currentJob && String(currentJob.status || '') === 'running') {
+        updateStatus('素材正在后台生成中，请等待完成。');
+        return;
+    }
+    nodes.backdrop.classList.remove('open');
+    nodes.backdrop.setAttribute('aria-hidden', 'true');
+    avatarGenerationActiveJobId = '';
+    avatarGenerationCurrentSnapshot = null;
+    if (avatarGenerationPollTimer) {
+        clearInterval(avatarGenerationPollTimer);
+        avatarGenerationPollTimer = null;
+    }
+}
+
+let avatarGenerationCurrentSnapshot = null;
+
+async function fetchAvatarGenerationJob(jobId) {
+    const response = await fetch(`/api/avatar-materials/jobs/${encodeURIComponent(jobId)}`);
+    const result = await response.json();
+    if (!response.ok || result.code !== 0) {
+        throw new Error(result.msg || `任务状态读取失败：${response.status}`);
+    }
+    return result.data || {};
+}
+
+async function refreshAvatarGenerationJob(jobId) {
+    if (!jobId || avatarGenerationBusy) {
+        return;
+    }
+    avatarGenerationBusy = true;
+    try {
+        const job = await fetchAvatarGenerationJob(jobId);
+        avatarGenerationCurrentSnapshot = job;
+        renderAvatarGenerationJob(job);
+        if (job.status === 'success') {
+            if (avatarGenerationPollTimer) {
+                clearInterval(avatarGenerationPollTimer);
+                avatarGenerationPollTimer = null;
+            }
+            await loadAvatarMaterials({ updateCurrent: false });
+            updateStatus(`素材 ${job.avatar_id} 已生成，请点击“切换并保存”。`);
+        } else if (job.status === 'error') {
+            if (avatarGenerationPollTimer) {
+                clearInterval(avatarGenerationPollTimer);
+                avatarGenerationPollTimer = null;
+            }
+            updateStatus(`素材 ${job.avatar_id} 生成失败：${job.message || 'unknown error'}`);
+        }
+    } catch (error) {
+        if (avatarGenerationPollTimer) {
+            clearInterval(avatarGenerationPollTimer);
+            avatarGenerationPollTimer = null;
+        }
+        const nodes = getAvatarGenerationModalNodes();
+        if (nodes.message) {
+            nodes.message.textContent = `读取任务状态失败：${error}`;
+        }
+        updateStatus(`读取素材生成进度失败：${error}`);
+    } finally {
+        avatarGenerationBusy = false;
+    }
+}
+
+function startAvatarGenerationPolling(jobId) {
+    if (avatarGenerationPollTimer) {
+        clearInterval(avatarGenerationPollTimer);
+        avatarGenerationPollTimer = null;
+    }
+    avatarGenerationCurrentSnapshot = null;
+    refreshAvatarGenerationJob(jobId);
+    avatarGenerationPollTimer = window.setInterval(() => {
+        refreshAvatarGenerationJob(jobId);
+    }, 1200);
+}
+
+async function createAvatarMaterial() {
+    const nameInput = document.getElementById('avatar-material-name');
+    const fileInput = document.getElementById('avatar-material-file');
+    const fileNameNode = document.getElementById('avatar-material-file-name');
+    const avatarId = String(nameInput ? nameInput.value : '').trim();
+    if (!avatarId) {
+        updateStatus('请输入素材名。');
+        return;
+    }
+    if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(avatarId)) {
+        updateStatus('素材名只能包含字母、数字、下划线和连字符，且不能以符号开头。');
+        return;
+    }
+    const existingIds = new Set((Array.isArray(avatarOptionsCache) ? avatarOptionsCache : []).map((item) => String(item.id || '')));
+    if (existingIds.has(avatarId)) {
+        updateStatus(`素材名已存在：${avatarId}`);
+        return;
+    }
+    if (!fileInput || !fileInput.files || !fileInput.files.length) {
+        updateStatus('请选择一个 mp4 文件。');
+        return;
+    }
+
+    const file = fileInput.files[0];
+    if (!String(file.name || '').toLowerCase().endsWith('.mp4')) {
+        updateStatus('请上传 mp4 文件。');
+        return;
+    }
+
+    const form = new FormData();
+    form.append('avatar_id', avatarId);
+    form.append('file', file, file.name || `${avatarId}.mp4`);
+
+    updateStatus(`正在生成素材 ${avatarId}...`);
+    const response = await fetch('/api/avatar-materials', {
+        method: 'POST',
+        body: form
+    });
+    const result = await response.json();
+    if (result.code !== 0) {
+        throw new Error(result.msg || '生成素材失败');
+    }
+
+    const job = result.data || {};
+    if (!job.job_id) {
+        throw new Error('生成任务创建失败');
+    }
+    syncAvatarMaterialName(true);
+    openAvatarGenerationModal(job);
+    startAvatarGenerationPolling(String(job.job_id || ''));
+    if (fileNameNode) {
+        fileNameNode.textContent = '未选择文件';
+    }
+    if (nameInput) {
+        nameInput.dataset.autoFilled = '1';
+    }
+    if (fileInput) {
+        fileInput.value = '';
+    }
+    updateStatus(`素材 ${avatarId} 已进入后台生成。`);
+}
+
+async function confirmAvatarGenerationSelection() {
+    const job = avatarGenerationCurrentSnapshot;
+    if (!job || String(job.status || '') !== 'success') {
+        return;
+    }
+    currentAvatarIdCache = String(job.avatar_id || currentAvatarIdCache || '');
+    renderAvatarTable();
+    try {
+        await saveSettings();
+        updateStatus(`已切换到素材 ${currentAvatarIdCache}。`);
+        closeAvatarGenerationModal(true);
+    } catch (error) {
+        updateStatus(`素材已生成，但保存当前 Avatar 失败：${error}`);
+    }
+}
+
+async function deleteAvatarMaterial(avatarId) {
+    if (!avatarId) {
+        return;
+    }
+    if (!window.confirm(`确定删除素材 ${avatarId} 吗？`)) {
+        return;
+    }
+    updateStatus(`正在删除素材 ${avatarId}...`);
+    const response = await fetch(`/api/avatar-materials/${encodeURIComponent(avatarId)}`, {
+        method: 'DELETE'
+    });
+    const result = await response.json();
+    if (result.code !== 0) {
+        throw new Error(result.msg || '删除素材失败');
+    }
+    const data = result.data || {};
+    avatarOptionsCache = Array.isArray(data.avatar_options) ? data.avatar_options : [];
+    avatarSilenceGateCache = {};
+    avatarOptionsCache.forEach((item) => {
+        if (item && item.id) {
+            avatarSilenceGateCache[item.id] = Boolean(item.silence_gate_enabled);
+        }
+    });
+    syncAvatarMaterialName(true);
+    renderAvatarTable();
+    renderAvatarMaterialsTable();
+    updateStatus(`素材 ${avatarId} 已删除。`);
 }
 
 function renderAvatarTable() {
@@ -1072,7 +1878,7 @@ function renderAvatarTable() {
             ? Boolean(avatarSilenceGateCache[avatarId])
             : Boolean(item.silence_gate_enabled);
         return `
-            <tr class="${selected ? 'selected' : ''}" data-avatar-id="${avatarId}">
+            <tr class="${selected ? 'selected' : ''}" data-avatar-id="${avatarId}" data-thumbnail-url="${item.thumbnail_url || ''}">
                 <td><input type="radio" name="avatar-choice" value="${avatarId}" ${selected ? 'checked' : ''}/></td>
                 <td>${label}</td>
                 <td>
@@ -1086,6 +1892,26 @@ function renderAvatarTable() {
         `;
     }).join('');
 
+    tbody.querySelectorAll('tr[data-avatar-id]').forEach((row) => {
+        const avatarId = row.dataset.avatarId || '';
+        const item = avatars.find((entry) => String(entry.id || '') === avatarId);
+        if (!item) {
+            return;
+        }
+        row.addEventListener('mouseenter', (event) => {
+            showAvatarSelectionPreview(item, event);
+        });
+        row.addEventListener('mousemove', (event) => {
+            const nodes = getAvatarMaterialPreviewNodes();
+            if (nodes.panel && nodes.panel.classList.contains('open')) {
+                positionAvatarMaterialPreview(nodes.panel, event);
+            }
+        });
+        row.addEventListener('mouseleave', () => {
+            scheduleHideAvatarMaterialPreview();
+        });
+    });
+
     tbody.querySelectorAll('tr').forEach((row) => {
         row.addEventListener('click', (event) => {
             if (event.target.closest('input, label')) {
@@ -1097,12 +1923,24 @@ function renderAvatarTable() {
             }
             currentAvatarIdCache = row.dataset.avatarId || currentAvatarIdCache;
             renderAvatarTable();
+            renderAvatarMaterialsTable();
+            updateSettingsSummary(
+                document.getElementById('tts-engine') ? document.getElementById('tts-engine').value : 'vits_zh',
+                document.getElementById('llm-provider') ? document.getElementById('llm-provider').value : 'openai_chat',
+                currentAvatarIdCache
+            );
         });
     });
     tbody.querySelectorAll('input[name="avatar-choice"]').forEach((radio) => {
         radio.addEventListener('change', () => {
             currentAvatarIdCache = radio.value || currentAvatarIdCache;
             renderAvatarTable();
+            renderAvatarMaterialsTable();
+            updateSettingsSummary(
+                document.getElementById('tts-engine') ? document.getElementById('tts-engine').value : 'vits_zh',
+                document.getElementById('llm-provider') ? document.getElementById('llm-provider').value : 'openai_chat',
+                currentAvatarIdCache
+            );
         });
     });
     tbody.querySelectorAll('input.avatar-silence-gate').forEach((checkbox) => {
@@ -1389,6 +2227,8 @@ async function loadSettings() {
         });
     }
     renderAvatarTable();
+    renderAvatarMaterialsTable();
+    syncAvatarMaterialName(true);
     const llmSelect = document.getElementById('llm-provider');
     if (llmSelect && llmModeOptions.length) {
         llmSelect.innerHTML = llmModeOptions.map((item) => (
@@ -1492,6 +2332,8 @@ async function saveSettings() {
         });
     }
     renderAvatarTable();
+    renderAvatarMaterialsTable();
+    syncAvatarMaterialName(true);
     closeSettingsModal();
 }
 async function sendChatText(text) {
@@ -1664,6 +2506,53 @@ document.getElementById('settings-backdrop').addEventListener('click', (event) =
 document.querySelectorAll('.tab-button').forEach((button) => {
     button.addEventListener('click', () => switchSettingsTab(button.dataset.tab));
 });
+const avatarMaterialNameInput = document.getElementById('avatar-material-name');
+if (avatarMaterialNameInput) {
+    avatarMaterialNameInput.addEventListener('input', () => {
+        avatarMaterialNameInput.dataset.autoFilled = '0';
+    });
+}
+const avatarMaterialFileInput = document.getElementById('avatar-material-file');
+if (avatarMaterialFileInput) {
+    avatarMaterialFileInput.addEventListener('change', () => {
+        const fileNameNode = document.getElementById('avatar-material-file-name');
+        if (fileNameNode) {
+            fileNameNode.textContent = avatarMaterialFileInput.files && avatarMaterialFileInput.files.length
+                ? avatarMaterialFileInput.files[0].name
+                : '未选择文件';
+        }
+    });
+}
+const createAvatarMaterialButton = document.getElementById('create-avatar-material');
+if (createAvatarMaterialButton) {
+    createAvatarMaterialButton.addEventListener('click', () => {
+        createAvatarMaterial().catch((error) => {
+            updateStatus(`生成素材失败：${error}`);
+        });
+    });
+}
+const reloadAvatarMaterialsButton = document.getElementById('reload-avatar-materials');
+if (reloadAvatarMaterialsButton) {
+    reloadAvatarMaterialsButton.addEventListener('click', () => {
+        loadAvatarMaterials().catch((error) => {
+            updateStatus(`刷新素材失败：${error}`);
+        });
+    });
+}
+const closeAvatarGenerationButton = document.getElementById('close-avatar-generation');
+if (closeAvatarGenerationButton) {
+    closeAvatarGenerationButton.addEventListener('click', () => {
+        closeAvatarGenerationModal();
+    });
+}
+const confirmAvatarGenerationButton = document.getElementById('confirm-avatar-generation');
+if (confirmAvatarGenerationButton) {
+    confirmAvatarGenerationButton.addEventListener('click', () => {
+        confirmAvatarGenerationSelection().catch((error) => {
+            updateStatus(`切换素材失败：${error}`);
+        });
+    });
+}
     const ttsEngineSelect = document.getElementById('tts-engine');
     if (ttsEngineSelect) {
         ttsEngineSelect.addEventListener('change', () => {
@@ -1732,24 +2621,28 @@ window.addEventListener('livetalking:connectionstate', function (event) {
 
     if (state === 'ready' || state === 'connected') {
         setConnectionBadge('Connected');
-        updateStatus('WebRTC connected. You can record, upload audio, or type text.');
+        setConnectionStatus('WebRTC connected. You can record, upload audio, or type text.');
+        updateStatus('WebRTC 已连接。');
         return;
     }
 
     if (state === 'negotiating' || state === 'starting' || state === 'connecting' || state === 'ice-checking') {
         setConnectionBadge('Connecting');
+        setConnectionStatus('WebRTC connecting...');
         updateStatus('WebRTC connecting...');
         return;
     }
 
     if (state === 'stopped' || state === 'closed' || state === 'disconnected' || state === 'ice-disconnected') {
         setConnectionBadge('Disconnected');
+        setConnectionStatus('WebRTC disconnected. Refresh the page or wait for reconnect.');
         updateStatus('WebRTC disconnected. Refresh the page or wait for reconnect.');
         return;
     }
 
     if (state === 'failed' || state === 'error' || state === 'ice-failed') {
         setConnectionBadge('Failed');
+        setConnectionStatus('WebRTC connection failed. Check browser console and server logs.');
         updateStatus('WebRTC connection failed. Check browser console and server logs.');
     }
 });

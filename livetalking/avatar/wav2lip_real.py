@@ -199,24 +199,25 @@ def _safe_cycle_index(size: int, index: int) -> int:
         return 0
     return index % size
 
-def inference(quit_event,batch_size,face_list_cycle,audio_feat_queue,audio_out_queue,res_frame_queue,model):
+def inference(quit_event,batch_size,real,audio_feat_queue,audio_out_queue,res_frame_queue,model):
     
     #model = load_model("./models/wav2lip.pth")
     # input_face_list = glob.glob(os.path.join(face_imgs_path, '*.[jpJP][pnPN]*[gG]'))
     # input_face_list = sorted(input_face_list, key=lambda x: int(os.path.splitext(os.path.basename(x))[0]))
     # face_list_cycle = read_imgs(input_face_list)
     
-    #input_latent_list_cycle = torch.load(latents_out_path)
-    length = len(face_list_cycle)
     index = 0
     count=0
     counttime=0
     logged_runtime_device = False
     logger.info('start inference')
-    if length <= 0:
-        logger.error("Avatar face frame list is empty")
-        return
     while not quit_event.is_set():
+        face_list_cycle = real.face_list_cycle
+        length = len(face_list_cycle)
+        if length <= 0:
+            logger.warning("Avatar face frame list is empty")
+            time.sleep(0.1)
+            continue
         starttime=time.perf_counter()
         mel_batch = []
         try:
@@ -340,6 +341,11 @@ class LipReal(BaseReal):
             avatar_id,
             self.opt.AVATAR_DIR,
         )
+        while True:
+            try:
+                self.res_frame_queue.get_nowait()
+            except queue.Empty:
+                break
         self.idx = 0
         return avatar_id
 
@@ -496,7 +502,7 @@ class LipReal(BaseReal):
         self.tts.render(quit_event)
         
         infer_quit_event = Event()
-        infer_thread = Thread(target=inference, args=(infer_quit_event,self.batch_size,self.face_list_cycle,
+        infer_thread = Thread(target=inference, args=(infer_quit_event,self.batch_size,self,
                                            self.asr.feat_queue,self.asr.output_queue,self.res_frame_queue,
                                            self.model,))  #mp.Process
         infer_thread.start()

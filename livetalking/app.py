@@ -24,9 +24,11 @@ import json
 import logging
 import random
 import re
+import shutil
 import socket
 import os
 import time
+import tempfile
 from dataclasses import asdict
 from pathlib import Path
 from urllib.parse import quote
@@ -61,8 +63,12 @@ avatar = None
 app_config = None
 speech_recognizer: ParaformerProvider | None = None
 _avatar_cache: dict[tuple[str, str], tuple[Any, Any, Any, Any]] = {}
+_avatar_generation_jobs: dict[str, dict[str, Any]] = {}
 _ORIGINAL_GET_HOST_ADDRESSES = aioice_ice.get_host_addresses
 _preferred_ice_addresses: list[str] | None = None
+_AVATAR_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
+_AVATAR_JOB_PROGRESS_PATTERN = re.compile(r"(\d{1,3})%\|")
+_AVATAR_JOB_LOG_LIMIT = 120
 
 logging.getLogger("aioice").setLevel(logging.INFO)
 logging.getLogger("aiortc").setLevel(logging.INFO)
@@ -210,6 +216,239 @@ def _resolve_avatar_thumbnail_path(avatar_root: str, avatar_id: str) -> str:
     if full_images:
         return str(full_images[0])
     return ""
+
+
+def _normalize_avatar_id(value: str) -> str:
+    return str(value or "").strip()
+
+
+def _is_valid_avatar_id(avatar_id: str) -> bool:
+    return bool(_AVATAR_ID_PATTERN.fullmatch(avatar_id))
+
+
+def _avatar_root_path() -> Path:
+    avatar_root = _resolve_avatar_root()
+    return Path(avatar_root) if avatar_root else Path()
+
+
+def _avatar_target_path(avatar_id: str) -> Path:
+    return _avatar_root_path() / avatar_id
+
+
+def _list_existing_avatar_ids() -> list[str]:
+    return [item["id"] for item in list_available_avatar_ids()]
+
+
+def _next_avatar_id(existing_ids: list[str] | None = None) -> str:
+    ids = existing_ids if existing_ids is not None else _list_existing_avatar_ids()
+    max_suffix = 0
+    for avatar_id in ids:
+        match = re.fullmatch(r"avatar_(\d+)", avatar_id)
+        if match:
+            max_suffix = max(max_suffix, int(match.group(1)))
+    return f"avatar_{max_suffix + 1}"
+
+
+def _invalidate_avatar_cache(avatar_id: str | None = None) -> None:
+    if avatar_id:
+        keys_to_remove = [key for key in _avatar_cache if key[1] == avatar_id]
+        for key in keys_to_remove:
+            _avatar_cache.pop(key, None)
+        return
+    _avatar_cache.clear()
+
+
+def avatar_materials_payload() -> dict:
+    avatar_options = list_available_avatar_ids()
+    existing_ids = [item["id"] for item in avatar_options]
+    if app_config is not None:
+        current_avatar_id = getattr(app_config.avatar.wav2lip, "avatar_id", getattr(opt, "avatar_id", "avatar_1"))
+    else:
+        current_avatar_id = getattr(opt, "avatar_id", "avatar_1")
+    return {
+        "avatar_options": avatar_options,
+        "current_avatar_id": str(current_avatar_id or "avatar_1"),
+        "next_avatar_id": _next_avatar_id(existing_ids),
+    }
+
+
+def _avatar_generation_job_payload(job_id: str) -> dict:
+    job = _avatar_generation_jobs.get(job_id)
+    if job is None:
+        raise KeyError(job_id)
+    payload = {key: value for key, value in job.items() if not key.startswith("_")}
+    payload["log_tail"] = list(job.get("log_tail", []))
+    return payload
+
+
+def _create_avatar_generation_job(avatar_id: str, temp_video_path: Path) -> str:
+    job_id = f"{avatar_id}-{int(time.time() * 1000)}-{random.randint(1000, 9999)}"
+    now = time.time()
+    _avatar_generation_jobs[job_id] = {
+        "job_id": job_id,
+        "avatar_id": avatar_id,
+        "status": "queued",
+        "phase": "等待启动",
+        "progress": 0,
+        "message": "已接收素材生成请求",
+        "log_tail": [],
+        "created_at": now,
+        "updated_at": now,
+        "_temp_video_path": temp_video_path,
+        "_target_dir": _avatar_target_path(avatar_id),
+        "_task": None,
+    }
+    return job_id
+
+
+def _update_avatar_generation_job(job_id: str, **fields: Any) -> None:
+    job = _avatar_generation_jobs.get(job_id)
+    if job is None:
+        return
+    job.update(fields)
+    job["updated_at"] = time.time()
+
+
+def _append_avatar_generation_log(job_id: str, text: str) -> None:
+    job = _avatar_generation_jobs.get(job_id)
+    if job is None:
+        return
+    lines = [line.strip() for line in re.split(r"[\r\n]+", text) if line.strip()]
+    if not lines:
+        return
+    log_tail = job.setdefault("log_tail", [])
+    for line in lines:
+        log_tail.append(line)
+        if len(log_tail) > _AVATAR_JOB_LOG_LIMIT:
+            del log_tail[:-_AVATAR_JOB_LOG_LIMIT]
+        progress_match = _AVATAR_JOB_PROGRESS_PATTERN.search(line)
+        if progress_match:
+            try:
+                progress = max(0, min(100, int(progress_match.group(1))))
+            except ValueError:
+                progress = None
+            if progress is not None:
+                job["progress"] = min(progress, 99)
+                job["phase"] = "生成中"
+                job["message"] = line
+        else:
+            lower_line = line.lower()
+            if "reading images" in lower_line:
+                job["phase"] = "读取图片"
+            elif "prepared " in lower_line and " full frames" in lower_line:
+                job["phase"] = "准备检测"
+            elif "face detect" in lower_line:
+                job["phase"] = "人脸检测"
+            elif "writing face crops" in lower_line:
+                job["phase"] = "写入 face_imgs"
+            elif "face crop" in lower_line:
+                job["phase"] = "写入 face_imgs"
+            elif "recovering from oom error" in lower_line:
+                job["phase"] = "显存不足，降低 batch"
+            elif "using " in lower_line and "for inference" in lower_line:
+                job["phase"] = "初始化模型"
+            elif "traceback" in lower_line:
+                job["phase"] = "生成失败"
+            else:
+                job["message"] = line
+    job["updated_at"] = time.time()
+
+
+def _consume_avatar_generation_output(job_id: str, buffer: str) -> str:
+    if not buffer:
+        return buffer
+    normalized = buffer.replace("\r", "\n")
+    if "\n" not in normalized:
+        return buffer[-4096:]
+    parts = normalized.split("\n")
+    for line in parts[:-1]:
+        _append_avatar_generation_log(job_id, line)
+    return parts[-1]
+
+
+async def _run_avatar_generation_job(job_id: str) -> None:
+    job = _avatar_generation_jobs.get(job_id)
+    if job is None:
+        return
+
+    avatar_id = str(job["avatar_id"])
+    target_dir: Path = job["_target_dir"]
+    temp_video_path: Path = job["_temp_video_path"]
+    python_exe = REPO_ROOT / ".venv" / "Scripts" / "python.exe"
+    script_path = REPO_ROOT / "wav2lip" / "genavatar.py"
+    process = None
+
+    try:
+        _update_avatar_generation_job(
+            job_id,
+            status="running",
+            phase="启动生成器",
+            progress=2,
+            message="正在启动素材生成任务",
+        )
+        process = await asyncio.create_subprocess_exec(
+            str(python_exe),
+            str(script_path),
+            "--video_path",
+            str(temp_video_path),
+            "--img_size",
+            "256",
+            "--face_det_batch_size",
+            "4",
+            "--avatar_id",
+            avatar_id,
+            cwd=str(REPO_ROOT),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        buffer = ""
+        while True:
+            chunk = await process.stdout.read(4096) if process.stdout is not None else b""
+            if not chunk:
+                break
+            buffer += chunk.decode("utf-8", errors="ignore")
+            buffer = _consume_avatar_generation_output(job_id, buffer)
+        if buffer.strip():
+            _append_avatar_generation_log(job_id, buffer)
+        returncode = await process.wait()
+        if returncode != 0:
+            log_tail = _avatar_generation_jobs.get(job_id, {}).get("log_tail", [])
+            tail_text = "\n".join(log_tail[-20:]).strip()
+            message = tail_text or f"Avatar generation failed with code {returncode}"
+            raise RuntimeError(message)
+
+        _invalidate_avatar_cache(avatar_id)
+        _update_avatar_generation_job(
+            job_id,
+            status="success",
+            phase="完成",
+            progress=100,
+            message="素材生成完成",
+        )
+    except Exception as exc:
+        if target_dir.exists():
+            shutil.rmtree(target_dir, ignore_errors=True)
+        _invalidate_avatar_cache(avatar_id)
+        _update_avatar_generation_job(
+            job_id,
+            status="error",
+            phase="失败",
+            progress=100,
+            message=str(exc),
+            error=str(exc),
+        )
+        logger.exception("avatar generation job failed: job_id=%s avatar_id=%s", job_id, avatar_id)
+    finally:
+        if temp_video_path.exists():
+            try:
+                temp_video_path.unlink()
+            except OSError:
+                pass
+        if process is not None and process.returncode is None:
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
 
 
 def _encode_thumbnail(image_path: str, max_size: int = 320) -> tuple[bytes, str]:
@@ -967,6 +1206,123 @@ async def get_avatar_thumbnail(request: web.Request) -> web.Response:
         return json_response({"code": -1, "msg": str(exc)}, status=500)
 
 
+async def get_avatar_materials(request: web.Request) -> web.Response:
+    try:
+        return json_response({"code": 0, "msg": "ok", "data": avatar_materials_payload()})
+    except Exception as exc:
+        logger.exception("get_avatar_materials failed")
+        return json_response({"code": -1, "msg": str(exc)}, status=500)
+
+
+async def create_avatar_material(request: web.Request) -> web.Response:
+    target_dir: Path | None = None
+    temp_video_path: Path | None = None
+    try:
+        if app_config is None or opt is None:
+            raise RuntimeError("Runtime is not initialized")
+
+        form = await request.post()
+        avatar_id = _normalize_avatar_id(form.get("avatar_id", ""))
+        if not avatar_id:
+            raise ValueError("Missing avatar id")
+        if not _is_valid_avatar_id(avatar_id):
+            raise ValueError("Invalid avatar id. Use letters, numbers, '_' or '-' only.")
+
+        avatar_root = _avatar_root_path()
+        if not str(avatar_root):
+            raise RuntimeError("Avatar directory is unavailable")
+        avatar_root.mkdir(parents=True, exist_ok=True)
+
+        existing_ids = set(_list_existing_avatar_ids())
+        if avatar_id in existing_ids:
+            raise ValueError(f"Avatar already exists: {avatar_id}")
+
+        fileobj = form.get("file")
+        if fileobj is None:
+            raise ValueError("Missing mp4 file")
+
+        filename = _normalize_avatar_id(getattr(fileobj, "filename", ""))
+        if not filename.lower().endswith(".mp4"):
+            raise ValueError("Only mp4 files are supported")
+
+        temp_dir = Path(getattr(opt, "RUNTIME_TEMP_DIR", str(REPO_ROOT / "runtime" / "tmp")))
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4", dir=str(temp_dir)) as temp_file:
+            shutil.copyfileobj(fileobj.file, temp_file)
+            temp_video_path = Path(temp_file.name)
+
+        target_dir = _avatar_target_path(avatar_id)
+        python_exe = REPO_ROOT / ".venv" / "Scripts" / "python.exe"
+        if not python_exe.is_file():
+            raise RuntimeError(f"Python executable not found: {python_exe}")
+
+        job_id = _create_avatar_generation_job(avatar_id, temp_video_path)
+        task = asyncio.create_task(_run_avatar_generation_job(job_id))
+        _avatar_generation_jobs[job_id]["_task"] = task
+        temp_video_path = None
+        return json_response({"code": 0, "msg": "accepted", "data": _avatar_generation_job_payload(job_id)})
+    except ValueError as exc:
+        if target_dir is not None and target_dir.exists():
+            shutil.rmtree(target_dir, ignore_errors=True)
+            _invalidate_avatar_cache(target_dir.name)
+        logger.warning("create_avatar_material validation failed: %s", exc)
+        return json_response({"code": -1, "msg": str(exc)}, status=400)
+    except Exception as exc:
+        if target_dir is not None and target_dir.exists():
+            shutil.rmtree(target_dir, ignore_errors=True)
+            _invalidate_avatar_cache(target_dir.name)
+        logger.exception("create_avatar_material failed")
+        return json_response({"code": -1, "msg": str(exc)}, status=500)
+    finally:
+        if temp_video_path is not None and temp_video_path.exists():
+            try:
+                temp_video_path.unlink()
+            except OSError:
+                pass
+
+
+async def get_avatar_generation_job(request: web.Request) -> web.Response:
+    try:
+        job_id = str(request.match_info.get("job_id", "")).strip()
+        if not job_id:
+            return json_response({"code": -1, "msg": "Missing job id"}, status=400)
+        job = _avatar_generation_jobs.get(job_id)
+        if job is None:
+            return json_response({"code": -1, "msg": "Job not found"}, status=404)
+        return json_response({"code": 0, "msg": "ok", "data": _avatar_generation_job_payload(job_id)})
+    except Exception as exc:
+        logger.exception("get_avatar_generation_job failed")
+        return json_response({"code": -1, "msg": str(exc)}, status=500)
+
+
+async def delete_avatar_material(request: web.Request) -> web.Response:
+    try:
+        if app_config is None or opt is None:
+            raise RuntimeError("Runtime is not initialized")
+        avatar_id = _normalize_avatar_id(request.match_info.get("avatar_id", ""))
+        if not avatar_id:
+            return json_response({"code": -1, "msg": "Missing avatar id"}, status=400)
+        if not _is_valid_avatar_id(avatar_id):
+            return json_response({"code": -1, "msg": "Invalid avatar id"}, status=400)
+        current_avatar_id = getattr(app_config.avatar.wav2lip, "avatar_id", getattr(opt, "avatar_id", "avatar_1"))
+        if avatar_id == current_avatar_id:
+            return json_response({"code": -1, "msg": "Cannot delete the current avatar"}, status=400)
+
+        target_dir = _avatar_target_path(avatar_id)
+        if not target_dir.is_dir():
+            return json_response({"code": -1, "msg": "Avatar not found"}, status=404)
+
+        shutil.rmtree(target_dir)
+        _invalidate_avatar_cache(avatar_id)
+        return json_response({"code": 0, "msg": "ok", "data": avatar_materials_payload()})
+    except ValueError as exc:
+        logger.warning("delete_avatar_material validation failed: %s", exc)
+        return json_response({"code": -1, "msg": str(exc)}, status=400)
+    except Exception as exc:
+        logger.exception("delete_avatar_material failed")
+        return json_response({"code": -1, "msg": str(exc)}, status=500)
+
+
 async def update_runtime_config(request: web.Request) -> web.Response:
     try:
         params = await request.json()
@@ -1079,6 +1435,10 @@ def create_web_app() -> web.Application:
     appasync.router.add_get("/api/runtime/config", get_runtime_config)
     appasync.router.add_post("/api/runtime/config", update_runtime_config)
     appasync.router.add_get("/api/avatar-thumbnail/{avatar_id}", get_avatar_thumbnail)
+    appasync.router.add_get("/api/avatar-materials", get_avatar_materials)
+    appasync.router.add_get("/api/avatar-materials/jobs/{job_id}", get_avatar_generation_job)
+    appasync.router.add_post("/api/avatar-materials", create_avatar_material)
+    appasync.router.add_delete("/api/avatar-materials/{avatar_id}", delete_avatar_material)
     appasync.router.add_static("/web/", path=str(REPO_ROOT / "web"))
 
     cors = aiohttp_cors.setup(

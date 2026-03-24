@@ -1,6 +1,8 @@
 import os
 import cv2
-from torch.utils.model_zoo import load_url
+import torch
+from pathlib import Path
+from urllib.request import urlretrieve
 
 from ..core import FaceDetector
 
@@ -13,15 +15,37 @@ models_urls = {
 }
 
 
+def _looks_like_git_lfs_pointer(path_to_detector: str) -> bool:
+    try:
+        with open(path_to_detector, 'rb') as file:
+            header = file.read(64)
+        return header.startswith(b'version https://git-lfs.github.com/spec/v1')
+    except OSError:
+        return False
+
+
+def _ensure_local_weights(path_to_detector: str) -> str:
+    if os.path.isfile(path_to_detector) and not _looks_like_git_lfs_pointer(path_to_detector):
+        return path_to_detector
+
+    target_path = Path(path_to_detector)
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = target_path.with_suffix(target_path.suffix + '.download')
+    urlretrieve(models_urls['s3fd'], temp_path)
+    temp_path.replace(target_path)
+    return str(target_path)
+
+
 class SFDDetector(FaceDetector):
     def __init__(self, device, path_to_detector=os.path.join(os.path.dirname(os.path.abspath(__file__)), 's3fd.pth'), verbose=False):
         super(SFDDetector, self).__init__(device, verbose)
 
         # Initialise the face detector
-        if not os.path.isfile(path_to_detector):
-            model_weights = load_url(models_urls['s3fd'])
-        else:
-            model_weights = torch.load(path_to_detector)
+        path_to_detector = _ensure_local_weights(path_to_detector)
+        try:
+            model_weights = torch.load(path_to_detector, map_location=device, weights_only=False)
+        except TypeError:
+            model_weights = torch.load(path_to_detector, map_location=device)
 
         self.face_detector = s3fd()
         self.face_detector.load_state_dict(model_weights)
