@@ -1,0 +1,1763 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>数字人</title>
+    <style>
+        :root {
+            --bg: #eef3f6;
+            --card: #ffffff;
+            --line: #d7e1e8;
+            --text: #15202b;
+            --muted: #5b6b79;
+            --brand: #0f766e;
+            --brand-dark: #115e59;
+            --secondary: #475569;
+            --surface: #f8fbfc;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            padding: 12px;
+            font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+            background:
+                radial-gradient(circle at top left, rgba(15, 118, 110, 0.10), transparent 30%),
+                linear-gradient(180deg, #f5f8fa 0%, var(--bg) 100%);
+            color: var(--text);
+            min-height: 100vh;
+        }
+
+        .page {
+            max-width: 1520px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: minmax(360px, 1.05fr) minmax(380px, 1.15fr);
+            gap: 14px;
+            align-items: start;
+            min-height: calc(100vh - 24px);
+        }
+
+        .panel {
+            background: var(--card);
+            border: 1px solid rgba(15, 23, 42, 0.06);
+            border-radius: 24px;
+            box-shadow: 0 12px 30px rgba(15, 23, 42, 0.07);
+            overflow: hidden;
+            min-height: calc(100vh - 24px);
+        }
+
+        .panel-body {
+            padding: 16px 18px 18px;
+            height: 100%;
+        }
+
+        .hero {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+
+        .hero-title {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .hero-side {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+
+        .modal-backdrop {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.45);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            z-index: 50;
+        }
+
+        .modal-backdrop.open {
+            display: flex;
+        }
+
+        .modal {
+            width: min(920px, 100%);
+            max-height: calc(100vh - 48px);
+            overflow: auto;
+            border-radius: 22px;
+            background: #fff;
+            box-shadow: 0 30px 80px rgba(15, 23, 42, 0.28);
+            border: 1px solid rgba(15, 23, 42, 0.08);
+        }
+
+        .modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 18px 20px 12px;
+            border-bottom: 1px solid var(--line);
+        }
+
+        .modal-title {
+            margin: 0;
+            font-size: 18px;
+        }
+
+        .modal-body {
+            padding: 16px 20px 20px;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 14px;
+            flex-wrap: wrap;
+        }
+
+        .tab-button {
+            border: 1px solid var(--line);
+            background: #f6f9fb;
+            color: var(--text);
+            padding: 10px 14px;
+        }
+
+        .tab-button.active {
+            background: var(--brand);
+            color: #fff;
+            border-color: var(--brand);
+        }
+
+        .tab-panel {
+            display: none;
+        }
+
+        .tab-panel.active {
+            display: block;
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+            margin-top: 12px;
+        }
+
+        .hero h1 {
+            margin: 0;
+            font-size: 30px;
+            line-height: 1.1;
+        }
+
+        .hero p {
+            margin: 8px 0 0;
+            color: var(--muted);
+            font-size: 14px;
+        }
+
+        .badge {
+            padding: 8px 12px;
+            border-radius: 999px;
+            background: rgba(15, 118, 110, 0.10);
+            color: var(--brand-dark);
+            font-size: 12px;
+            white-space: nowrap;
+        }
+
+        .sticky {
+            position: sticky;
+            top: 16px;
+        }
+
+        .video-shell {
+            background: linear-gradient(160deg, #0f172a 0%, #14263b 100%);
+            border-radius: 24px;
+            padding: 14px;
+            margin-bottom: 16px;
+        }
+
+        video {
+            width: 100%;
+            aspect-ratio: 1 / 1;
+            min-height: 420px;
+            border-radius: 18px;
+            display: block;
+            background: #020617;
+        }
+
+        .session-strip {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 10px;
+            margin-top: 12px;
+        }
+
+        .mini-stat {
+            background: var(--surface);
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            padding: 10px 12px;
+        }
+
+        .mini-stat .label {
+            font-size: 12px;
+            color: var(--muted);
+            margin-bottom: 4px;
+        }
+
+        .mini-stat .value {
+            font-size: 14px;
+            font-weight: 600;
+            word-break: break-all;
+        }
+
+        .section {
+            border: 1px solid var(--line);
+            border-radius: 16px;
+            background: var(--surface);
+            padding: 14px;
+        }
+
+        .section + .section {
+            margin-top: 14px;
+        }
+
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+
+        .section-title {
+            margin: 0;
+            font-size: 16px;
+        }
+
+        .section-note {
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .table-wrap {
+            overflow: auto;
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            background: #fff;
+        }
+
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        .data-table th,
+        .data-table td {
+            padding: 12px 14px;
+            border-bottom: 1px solid var(--line);
+            text-align: left;
+            vertical-align: middle;
+        }
+
+        .data-table thead th {
+            position: sticky;
+            top: 0;
+            background: #f8fbfc;
+            z-index: 1;
+        }
+
+        .data-table tbody tr {
+            cursor: pointer;
+            transition: background 0.18s ease;
+        }
+
+        .data-table tbody tr:hover {
+            background: rgba(15, 118, 110, 0.05);
+        }
+
+        .data-table tbody tr.selected {
+            background: rgba(15, 118, 110, 0.10);
+        }
+
+        .avatar-status {
+            display: inline-flex;
+            align-items: center;
+            padding: 6px 10px;
+            border-radius: 999px;
+            background: rgba(15, 118, 110, 0.10);
+            color: var(--brand-dark);
+            font-size: 12px;
+            white-space: nowrap;
+        }
+
+        .toolbar,
+        .row-actions,
+        .mic-controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .toolbar {
+            margin-bottom: 12px;
+        }
+
+        .grid-3-actions {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 10px;
+        }
+
+        button,
+        select,
+        input[type="file"] {
+            border: 0;
+            border-radius: 12px;
+            font-size: 14px;
+        }
+
+        button {
+            padding: 10px 14px;
+            background: var(--brand);
+            color: #fff;
+            cursor: pointer;
+            transition: background 0.2s ease, transform 0.2s ease;
+        }
+
+        .grid-3-actions button {
+            width: 100%;
+        }
+
+        button:hover:not(:disabled) {
+            background: var(--brand-dark);
+            transform: translateY(-1px);
+        }
+
+        button.secondary {
+            background: var(--secondary);
+        }
+
+        button.ghost {
+            background: #dce7ec;
+            color: #16313a;
+        }
+
+        button.danger {
+            background: #dc2626;
+        }
+
+        button.danger.recording {
+            background: #991b1b;
+            box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.18);
+        }
+
+        button:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        textarea,
+        input[type="text"],
+        input[type="password"],
+        input[type="number"],
+        select {
+            width: 100%;
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            padding: 11px 12px;
+            background: #fff;
+            color: var(--text);
+            font-size: 14px;
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 72px;
+        }
+
+        label {
+            display: block;
+            font-size: 13px;
+            color: var(--muted);
+            margin-bottom: 6px;
+        }
+
+        .grid-2,
+        .grid-3 {
+            display: grid;
+            gap: 12px;
+        }
+
+        .grid-2 {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .grid-3 {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+
+        .grid-1 {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 12px;
+        }
+
+        .status {
+            min-height: 48px;
+            padding: 12px 14px;
+            border-radius: 16px;
+            background: #f1f8f7;
+            border: 1px solid #cbe8e2;
+            color: #155e57;
+            line-height: 1.45;
+        }
+
+        .result {
+            min-height: 88px;
+            max-height: 180px;
+            overflow: auto;
+            padding: 12px 14px;
+            border-radius: 14px;
+            background: #fff;
+            border: 1px solid var(--line);
+            white-space: pre-wrap;
+            line-height: 1.55;
+        }
+
+        .dialog-log {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            max-height: 280px;
+            overflow: auto;
+            padding: 10px 12px;
+            border-radius: 14px;
+            background: #fff;
+            border: 1px solid var(--line);
+        }
+
+        .dialog-history-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .dialog-history-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            margin: 0;
+            font-size: 13px;
+            color: var(--muted);
+            white-space: nowrap;
+        }
+
+        .dialog-history-toggle input {
+            width: auto;
+            margin: 0;
+        }
+
+        .dialog-history-note {
+            margin-bottom: 10px;
+            color: var(--muted);
+            font-size: 12px;
+            line-height: 1.45;
+        }
+
+        .dialog-item {
+            padding: 10px 12px;
+            border-radius: 12px;
+            border: 1px solid var(--line);
+            background: #f9fbfc;
+        }
+
+        .dialog-item.user {
+            background: #eefaf7;
+            border-color: #cde9e2;
+        }
+
+        .dialog-item.assistant {
+            background: #fff;
+        }
+
+        .dialog-meta {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            font-size: 12px;
+            color: var(--muted);
+            margin-bottom: 6px;
+        }
+
+        .dialog-text {
+            white-space: pre-wrap;
+            line-height: 1.55;
+            word-break: break-word;
+        }
+
+        .panel-scroll {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            max-height: calc(100vh - 64px);
+            overflow: auto;
+            padding-right: 4px;
+        }
+
+        details {
+            border: 1px solid var(--line);
+            border-radius: 16px;
+            background: #fff;
+            overflow: hidden;
+        }
+
+        details + details {
+            margin-top: 12px;
+        }
+
+        summary {
+            list-style: none;
+            cursor: pointer;
+            padding: 14px 16px;
+            font-weight: 600;
+            background: #fbfdfe;
+            border-bottom: 1px solid transparent;
+        }
+
+        details[open] summary {
+            border-bottom-color: var(--line);
+        }
+
+        summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .details-body {
+            padding: 14px 16px 16px;
+        }
+
+        .hint {
+            font-size: 12px;
+            color: var(--muted);
+            margin-top: 8px;
+            line-height: 1.5;
+        }
+
+        @media (max-width: 1180px) {
+            .page {
+                grid-template-columns: 1fr;
+                min-height: auto;
+            }
+
+            .sticky {
+                position: static;
+            }
+
+            .panel,
+            .panel-scroll {
+                min-height: auto;
+                max-height: none;
+                overflow: visible;
+            }
+
+            video {
+                min-height: 0;
+                aspect-ratio: 16 / 9;
+            }
+        }
+
+        @media (max-width: 720px) {
+            body {
+                padding: 12px;
+            }
+
+            .panel-body {
+                padding: 14px;
+            }
+
+            .hero {
+                flex-direction: column;
+            }
+
+            .session-strip,
+            .grid-2,
+            .grid-3 {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+<div class="page">
+    <div class="panel sticky">
+        <div class="panel-body">
+            <div class="hero">
+                <div class="hero-title">
+                    <h1>数字人</h1>
+                </div>
+                <div class="hero-side">
+                    <label style="display:flex;align-items:center;gap:8px;margin:0;">
+                        <input id="use-stun" type="checkbox"/>
+                        <span>使用 STUN 服务器</span>
+                    </label>
+                    <button id="open-settings" class="ghost" type="button">设置</button>
+                    <div class="badge" id="connection-badge">未连接</div>
+                </div>
+            </div>
+
+            <div class="video-shell">
+                <audio id="audio" autoplay="true"></audio>
+                <video id="video" autoplay="true" playsinline="true" muted></video>
+            </div>
+
+            <div class="status" id="status">页面加载后会自动连接 WebRTC。</div>
+
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="panel-body panel-scroll">
+            <div class="section">
+                <div class="section-header">
+                    <h2 class="section-title">输入</h2>
+                </div>
+
+                <div class="grid-1">
+                    <div>
+                        <label for="message">文本输入</label>
+                        <textarea id="message" placeholder="输入文本后点击发送文本"></textarea>
+                        <div class="grid-3-actions" style="margin-top:10px;">
+                            <button id="hold-to-talk" class="danger" type="button" title="松开后自动识别并填入上方文本框">按住收音</button>
+                            <button id="pick-audio" class="secondary" type="button" title="上传后自动识别并填入上方文本框">上传音频</button>
+                            <button id="send-text" class="ghost" type="button" title="把上方文本框中的文本发送到 LLM">发送文本</button>
+                        </div>
+                        <input id="audio-file" type="file" accept=".mp3,.wav,.m4a,.aac,.webm,.mp4,audio/*" hidden/>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-header">
+                    <h2 class="section-title">对话历史</h2>
+                    <div class="dialog-history-controls">
+                        <label class="dialog-history-toggle" for="continuous-dialogue-toggle">
+                            <input id="continuous-dialogue-toggle" type="checkbox"/>
+                            连续对话
+                        </label>
+                        <button id="clear-dialog-history" class="ghost" type="button">清空</button>
+                    </div>
+                </div>
+                <div class="dialog-history-note">开启后会把未清空的历史对话一并作为上下文，最多保留 10 条上下文。</div>
+                <div id="dialog-log" class="dialog-log">
+                    <div class="hint">还没有对话记录。</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<input type="hidden" id="sessionid" value="0">
+
+<div id="settings-backdrop" class="modal-backdrop" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+        <div class="modal-header">
+            <h2 class="modal-title" id="settings-title">ASR / TTS / LLM 设置</h2>
+            <button id="close-settings" class="ghost" type="button">关闭</button>
+        </div>
+        <div class="modal-body">
+            <div class="tabs">
+                <button class="tab-button active" type="button" data-tab="tts">TTS</button>
+                <button class="tab-button" type="button" data-tab="asr">ASR</button>
+                <button class="tab-button" type="button" data-tab="avatars">avatars</button>
+                <button class="tab-button" type="button" data-tab="llm">LLM</button>
+            </div>
+
+            <div class="tab-panel active" data-panel="tts">
+                <div class="section-note" id="tts-model-note"></div>
+                <div class="grid-2" style="margin-top:12px;">
+                    <div>
+                        <label for="tts-engine">TTS 引擎</label>
+                        <select id="tts-engine"></select>
+                    </div>
+                    <div>
+                        <label>引擎说明</label>
+                        <div class="section-note" id="tts-engine-desc" style="min-height:48px;padding-top:10px;"></div>
+                    </div>
+                </div>
+
+                <div id="tts-sherpa-panel" style="margin-top:12px;">
+                    <div class="grid-3">
+                    <div>
+                        <label for="tts-speaker">TTS 音色</label>
+                        <select id="tts-speaker">
+                            <option value="0">音色 1</option>
+                            <option value="1">音色 2</option>
+                            <option value="2">音色 3</option>
+                            <option value="3">音色 4</option>
+                            <option value="4">音色 5</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="tts-speed">TTS 语速</label>
+                        <input id="tts-speed" type="number" min="0.5" max="2.0" step="0.1" value="1.0"/>
+                    </div>
+                    <div>
+                        <label for="tts-threads">TTS 线程数</label>
+                        <input id="tts-threads" type="number" min="1" max="16" step="1" value="2"/>
+                    </div>
+                </div>
+            </div>
+
+
+                <div id="tts-edge-panel" style="display:none;margin-top:12px;">
+                    <div class="grid-2">
+                        <div>
+                            <label for="edge-voice-name">EdgeTTS 声音</label>
+                            <input id="edge-voice-name" type="text" value="zh-CN-XiaoxiaoNeural"/>
+                        </div>
+                        <div>
+                            <label for="edge-speed">EdgeTTS 语速</label>
+                            <input id="edge-speed" type="text" value="0%"/>
+                        </div>
+                    </div>
+                </div>
+
+                </div>
+
+            <div class="tab-panel" data-panel="asr">
+                <div class="section-note" id="asr-model-note"></div>
+                <div class="grid-2" style="margin-top:12px;">
+                    <div>
+                        <label for="asr-device">ASR 设备</label>
+                        <input id="asr-device" type="text" value="cuda:0"/>
+                    </div>
+                    <div>
+                        <label for="asr-batch-size">ASR 批量时长 (秒)</label>
+                        <input id="asr-batch-size" type="number" min="1" step="1" value="300"/>
+                    </div>
+                </div>
+                <div class="section-note" style="margin-top:12px;">
+                    热词会传给 FunASR 热词接口，近音词会在识别结果后处理。支持空行和以 #、;、// 开头的注释行。
+                </div>
+                <div style="margin-top:12px;">
+                    <label for="asr-hotwords">热词配置</label>
+                    <textarea id="asr-hotwords" style="min-height:120px;" placeholder="每行一个热词或短语，例如：&#10;云台&#10;数字人&#10;监控"></textarea>
+                </div>
+                <div style="margin-top:12px;">
+                    <label for="asr-phonetic-replacements">近音词配置</label>
+                    <textarea id="asr-phonetic-replacements" style="min-height:120px;" placeholder="每行一个替换规则，例如：&#10;相继 => 相机&#10;运泰 => 云台"></textarea>
+                </div>
+            </div>
+
+            <div class="tab-panel" data-panel="avatars">
+                <div class="section-note" id="avatar-model-note"></div>
+                <div class="section-note" style="margin-top:12px;">
+                    静默门腔会跟随每个 avatar 保存。不勾选时，静默默认播放视频帧，适合没有说话的视频素材。勾选后，静默默认固定在静止画面，适合说话视频素材。
+                </div>
+                <div style="margin-top:14px;">
+                    <div class="section-header">
+                        <h3 class="section-title" style="margin:0;">avatars</h3>
+                        <div class="section-note">选择当前使用的头像模型</div>
+                    </div>
+                    <div class="table-wrap">
+                        <table class="data-table" id="avatar-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 90px;">选择</th>
+                                    <th>avatar</th>
+                                    <th style="width: 160px;">静默门腔</th>
+                                    <th style="width: 160px;">状态</th>
+                                </tr>
+                            </thead>
+                            <tbody id="avatar-table-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tab-panel" data-panel="llm">
+                <div class="section-note" id="llm-model-note"></div>
+                <div style="margin-top:12px;">
+                    <label for="llm-provider">LLM 模式</label>
+                    <select id="llm-provider"></select>
+                </div>
+                <div class="grid-2" style="margin-top:12px;">
+                    <div>
+                        <label for="llm-base-url">LLM 基础地址</label>
+                        <input id="llm-base-url" type="text"/>
+                    </div>
+                    <div>
+                        <label for="llm-model">LLM 模型</label>
+                        <input id="llm-model" type="text"/>
+                    </div>
+                </div>
+
+                <div class="grid-2" style="margin-top:12px;">
+                    <div>
+                        <label for="llm-timeout">LLM 超时 (秒)</label>
+                        <input id="llm-timeout" type="number" min="1" step="1" value="60"/>
+                    </div>
+                    <div>
+                        <label for="llm-api-key">LLM 密钥</label>
+                        <input id="llm-api-key" type="password"/>
+                    </div>
+                </div>
+
+                <div style="margin-top:12px;">
+                    <label for="llm-system-prompt">系统提示词</label>
+                    <textarea id="llm-system-prompt" style="min-height:120px;"></textarea>
+                </div>
+            </div>
+
+            <div class="modal-actions">
+                <button id="reload-settings" class="ghost" type="button">重新加载</button>
+                <button id="save-settings" type="button">保存设置</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="client.js"></script>
+<script>
+let mediaRecorder = null;
+let mediaStream = null;
+let recordedChunks = [];
+let isRecording = false;
+let pendingInputSource = 'text';
+let pendingInputMeta = {};
+let dialogPollTimer = null;
+let autoConnectTriggered = false;
+let continuousDialogueEnabled = false;
+
+const CONTINUOUS_DIALOGUE_STORAGE_KEY = 'livetalking.continuousDialogueEnabled';
+
+function updateStatus(text) {
+    document.getElementById('status').textContent = text;
+}
+
+function setConnectionBadge(text) {
+    document.getElementById('connection-badge').textContent = text;
+}
+
+function currentSessionId() {
+    return parseInt(document.getElementById('sessionid').value || '0', 10);
+}
+
+function ensureSession() {
+    const sessionId = currentSessionId();
+    if (!sessionId) {
+        updateStatus('WebRTC not connected.');
+        return 0;
+    }
+    return sessionId;
+}
+
+async function postJson(url, payload) {
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+    const result = await response.json();
+    if (!response.ok || result.code !== 0) {
+        throw new Error(result.msg || `请求失败：${response.status}`);
+    }
+    return result;
+}
+
+function formatDialogTime(ts) {
+    if (!ts) {
+        return '';
+    }
+    const date = new Date(ts * 1000);
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function formatSeconds(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) {
+        return '';
+    }
+    return `${num.toFixed(2)}s`;
+}
+
+function syncContinuousDialogueToggle() {
+    const checkbox = document.getElementById('continuous-dialogue-toggle');
+    if (checkbox) {
+        checkbox.checked = continuousDialogueEnabled;
+    }
+}
+
+function setContinuousDialogueEnabled(enabled, persist = true) {
+    continuousDialogueEnabled = Boolean(enabled);
+    syncContinuousDialogueToggle();
+    if (persist) {
+        try {
+            window.localStorage.setItem(CONTINUOUS_DIALOGUE_STORAGE_KEY, continuousDialogueEnabled ? '1' : '0');
+        } catch (error) {
+            // Ignore storage failures and keep the in-memory state.
+        }
+    }
+}
+
+function loadContinuousDialogueSetting() {
+    let enabled = false;
+    try {
+        enabled = window.localStorage.getItem(CONTINUOUS_DIALOGUE_STORAGE_KEY) === '1';
+    } catch (error) {
+        enabled = false;
+    }
+    setContinuousDialogueEnabled(enabled, false);
+}
+
+function renderConversation(history) {
+    const container = document.getElementById('dialog-log');
+    const items = Array.isArray(history) ? history : [];
+    if (!items.length) {
+        container.innerHTML = '<div class="hint">还没有对话记录。</div>';
+        return;
+    }
+
+    container.innerHTML = items.map((item) => {
+        const role = (item.role || 'user').toLowerCase();
+        const label = role === 'assistant' ? 'LLM' : 'User';
+        const source = item.source ? ` · ${item.source}` : '';
+        const time = formatDialogTime(item.ts);
+        const meta = item.meta || {};
+        const descParts = [];
+        if (role === 'assistant') {
+            if (meta.llm_elapsed != null) {
+                descParts.push(`LLM ${formatSeconds(meta.llm_elapsed)}`);
+            }
+            if (meta.tts_elapsed != null) {
+                descParts.push(`TTS ${formatSeconds(meta.tts_elapsed)}`);
+            }
+            if (meta.avatar_first_frame_elapsed != null) {
+                descParts.push(`首帧 ${formatSeconds(meta.avatar_first_frame_elapsed)}`);
+            }
+            if (meta.avatar_elapsed != null) {
+                descParts.push(`Avatar ${formatSeconds(meta.avatar_elapsed)}`);
+            }
+        } else if (meta.asr_elapsed != null) {
+            descParts.push(`ASR ${formatSeconds(meta.asr_elapsed)}`);
+        }
+        const desc = descParts.length ? ` · ${descParts.join(' · ')}` : '';
+        return `
+              <div class="dialog-item ${role}">
+                  <div class="dialog-meta">
+                    <span>${label}${source}${desc}</span>
+                      <span>${time}</span>
+                  </div>
+                  <div class="dialog-text"></div>
+              </div>
+          `;
+    }).join('');
+
+    const nodes = container.querySelectorAll('.dialog-text');
+    items.forEach((item, index) => {
+        nodes[index].textContent = item.text || '';
+    });
+    container.scrollTop = container.scrollHeight;
+}
+
+async function loadConversationHistory() {
+    const sessionId = currentSessionId();
+    if (!sessionId) {
+        return;
+    }
+
+    const response = await fetch(`/api/dialog/history?sessionid=${encodeURIComponent(sessionId)}&limit=80`);
+    const result = await response.json();
+    if (result.code !== 0) {
+        return;
+    }
+    renderConversation(result.data || []);
+}
+
+async function clearConversationHistory() {
+    const sessionId = ensureSession();
+    if (!sessionId) {
+        return;
+    }
+    updateStatus('Loading conversation history...');
+    const result = await postJson('/api/dialog/clear', {
+        sessionid: sessionId
+    });
+    if (result.code === 0) {
+        renderConversation([]);
+        updateStatus('Conversation history cleared.');
+        return;
+    }
+    updateStatus(`Request failed: ${result.msg}`);
+}
+
+function ensureConversationPolling() {
+    if (dialogPollTimer) {
+        return;
+    }
+    dialogPollTimer = setInterval(() => {
+        if (currentSessionId()) {
+            loadConversationHistory().catch(() => {});
+        }
+    }, 1000);
+}
+
+function autoStartWebRTC() {
+    if (autoConnectTriggered) {
+        return;
+    }
+    autoConnectTriggered = true;
+    if (!currentSessionId()) {
+        start();
+    }
+}
+
+function openSettingsModal() {
+    const backdrop = document.getElementById('settings-backdrop');
+    backdrop.classList.add('open');
+    backdrop.setAttribute('aria-hidden', 'false');
+    switchSettingsTab('tts');
+}
+
+function closeSettingsModal() {
+    const backdrop = document.getElementById('settings-backdrop');
+    backdrop.classList.remove('open');
+    backdrop.setAttribute('aria-hidden', 'true');
+}
+
+function switchSettingsTab(tabName) {
+    document.querySelectorAll('.tab-button').forEach((button) => {
+        button.classList.toggle('active', button.dataset.tab === tabName);
+    });
+    document.querySelectorAll('.tab-panel').forEach((panel) => {
+        panel.classList.toggle('active', panel.dataset.panel === tabName);
+    });
+}
+
+function renderAvatarTable() {
+    const tbody = document.getElementById('avatar-table-body');
+    if (!tbody) {
+        return;
+    }
+    const avatars = Array.isArray(avatarOptionsCache) ? avatarOptionsCache : [];
+    const currentAvatarId = currentAvatarIdCache || (avatars[0] && avatars[0].id) || '';
+
+    if (!avatars.length) {
+        tbody.innerHTML = '<tr><td colspan="4">No avatar models found</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = avatars.map((item) => {
+        const avatarId = item.id || '';
+        const label = item.label || avatarId;
+        const selected = avatarId === currentAvatarId;
+        const silenceGateEnabled = Object.prototype.hasOwnProperty.call(avatarSilenceGateCache, avatarId)
+            ? Boolean(avatarSilenceGateCache[avatarId])
+            : Boolean(item.silence_gate_enabled);
+        return `
+            <tr class="${selected ? 'selected' : ''}" data-avatar-id="${avatarId}">
+                <td><input type="radio" name="avatar-choice" value="${avatarId}" ${selected ? 'checked' : ''}/></td>
+                <td>${label}</td>
+                <td>
+                    <label style="display:flex;align-items:center;gap:8px;">
+                        <input type="checkbox" class="avatar-silence-gate" data-avatar-id="${avatarId}" ${silenceGateEnabled ? 'checked' : ''}/>
+                        <span>开启</span>
+                    </label>
+                </td>
+                <td><span class="avatar-status">${selected ? 'current' : 'switch'}</span></td>
+            </tr>
+        `;
+    }).join('');
+
+    tbody.querySelectorAll('tr').forEach((row) => {
+        row.addEventListener('click', (event) => {
+            if (event.target.closest('input, label')) {
+                return;
+            }
+            const radio = row.querySelector('input[type="radio"]');
+            if (radio) {
+                radio.checked = true;
+            }
+            currentAvatarIdCache = row.dataset.avatarId || currentAvatarIdCache;
+            renderAvatarTable();
+        });
+    });
+    tbody.querySelectorAll('input[name="avatar-choice"]').forEach((radio) => {
+        radio.addEventListener('change', () => {
+            currentAvatarIdCache = radio.value || currentAvatarIdCache;
+            renderAvatarTable();
+        });
+    });
+    tbody.querySelectorAll('input.avatar-silence-gate').forEach((checkbox) => {
+        checkbox.addEventListener('click', (event) => {
+            event.stopPropagation();
+        });
+        checkbox.addEventListener('change', () => {
+            avatarSilenceGateCache[checkbox.dataset.avatarId || ''] = checkbox.checked;
+        });
+    });
+}
+
+function getSelectedAvatarId() {
+    const selected = document.querySelector('input[name="avatar-choice"]:checked');
+    return selected ? selected.value : currentAvatarIdCache;
+}
+
+function normalizeTtsEngine(engine) {
+    return String(engine || '').trim().toLowerCase().replace(/-/g, '_');
+}
+
+function normalizeLlmMode(mode) {
+    const normalized = String(mode || '').trim().toLowerCase().replace(/-/g, '_');
+    if (!normalized || normalized === 'openai_chat' || normalized === 'openai_responses' || normalized === 'responses' || normalized === 'responses_api') {
+        return 'openai_chat';
+    }
+    if (normalized === 'chat_completions' || normalized === 'chat_completions_api') {
+        return 'chat_completions_api';
+    }
+    if (normalized === 'lm_studio' || normalized === 'lmstudio' || normalized === 'lmstudio_api' || normalized === 'lm_studio_api') {
+        return 'lm_studio_api';
+    }
+    return normalized;
+}
+
+let ttsConfigCache = {
+    sherpa_onnx_vits: {},
+    sherpa_onnx_vits_zh_en: {},
+    edgetts: {}
+};
+let ttsVoiceOptionsCache = {
+    sherpa_onnx_vits: [],
+    sherpa_onnx_vits_zh_en: [],
+    edgetts: []
+};
+let llmConfigCache = {
+    openai_chat: {},
+    chat_completions_api: {},
+    lm_studio_api: {}
+};
+let llmModeOptionsCache = [];
+let avatarOptionsCache = [];
+let currentAvatarIdCache = '';
+let avatarSilenceGateCache = {};
+
+function getLlmModeLabel(mode) {
+    const normalized = normalizeLlmMode(mode) || 'openai_chat';
+    const item = llmModeOptionsCache.find((entry) => entry.id === normalized);
+    return (item && (item.label || item.id)) || normalized;
+}
+
+function updateSettingsSummary(engine, llmMode, avatarId) {
+    const ttsNote = document.getElementById('tts-model-note');
+    const llmNote = document.getElementById('llm-model-note');
+    const avatarNote = document.getElementById('avatar-model-note');
+    const currentAvatarId = String(avatarId || currentAvatarIdCache || '');
+    const avatarItem = (Array.isArray(avatarOptionsCache) ? avatarOptionsCache : []).find((item) => String(item.id || '') === currentAvatarId);
+    const avatarLabel = avatarItem ? (avatarItem.label || avatarItem.id || currentAvatarId) : (currentAvatarId || '未选择');
+    const avatarGateEnabled = avatarItem
+        ? (Object.prototype.hasOwnProperty.call(avatarSilenceGateCache, currentAvatarId)
+            ? Boolean(avatarSilenceGateCache[currentAvatarId])
+            : Boolean(avatarItem.silence_gate_enabled))
+        : false;
+
+    if (ttsNote) {
+        ttsNote.textContent = `当前 TTS：${getTtsEngineDescription(engine)}`;
+    }
+    if (llmNote) {
+        llmNote.textContent = `当前 LLM：${getLlmModeLabel(llmMode)}`;
+    }
+    if (avatarNote) {
+        avatarNote.textContent = currentAvatarId
+            ? `当前 Avatar：${avatarLabel}${avatarGateEnabled ? '，静默门控：开启' : '，静默门控：关闭'}`
+            : '当前 Avatar：未选择';
+    }
+}
+
+function applyLlmFormValues(mode) {
+    const normalized = normalizeLlmMode(mode) || 'openai_chat';
+    const config = llmConfigCache[normalized] || {};
+    const baseUrl = document.getElementById('llm-base-url');
+    const model = document.getElementById('llm-model');
+    const timeout = document.getElementById('llm-timeout');
+    const apiKey = document.getElementById('llm-api-key');
+    const systemPrompt = document.getElementById('llm-system-prompt');
+
+    if (baseUrl) {
+        baseUrl.value = config.base_url || '';
+    }
+    if (model) {
+        model.value = config.model || '';
+    }
+    if (timeout) {
+        timeout.value = String(config.timeout_s ?? 60);
+    }
+    if (apiKey) {
+        apiKey.value = config.api_key || '';
+    }
+    if (systemPrompt) {
+        systemPrompt.value = config.system_prompt_zh || '';
+    }
+}
+
+function getSherpaTtsConfig(engine) {
+    const normalized = normalizeTtsEngine(engine) || 'sherpa_onnx_vits';
+    if (normalized === 'sherpa_onnx_vits_zh_en') {
+        return ttsConfigCache.sherpa_onnx_vits_zh_en || {};
+    }
+    return ttsConfigCache.sherpa_onnx_vits || {};
+}
+
+function applyTtsFormValues(engine) {
+    const normalized = normalizeTtsEngine(engine) || 'sherpa_onnx_vits';
+    const sherpa = (normalized === 'sherpa_onnx_vits' || normalized === 'sherpa_onnx_vits_zh_en')
+        ? getSherpaTtsConfig(normalized)
+        : (ttsConfigCache.sherpa_onnx_vits || {});
+    const edge = ttsConfigCache.edgetts || {};
+
+    const speaker = document.getElementById('tts-speaker');
+    const speed = document.getElementById('tts-speed');
+    const threads = document.getElementById('tts-threads');
+    const edgeVoice = document.getElementById('edge-voice-name');
+    const edgeSpeed = document.getElementById('edge-speed');
+
+    if (speaker) {
+        speaker.value = String(sherpa.speaker_id ?? 4);
+    }
+    if (speed) {
+        speed.value = String(sherpa.speed ?? 1.0);
+    }
+    if (threads) {
+        threads.value = String(sherpa.num_threads ?? 2);
+    }
+    if (edgeVoice) {
+        edgeVoice.value = edge.voice_name || 'zh-CN-XiaoxiaoNeural';
+    }
+    if (edgeSpeed) {
+        edgeSpeed.value = edge.speed || '0%';
+    }
+}
+
+function applyTtsVoiceOptions(engine) {
+    const normalized = normalizeTtsEngine(engine) || 'sherpa_onnx_vits';
+    const speakerSelect = document.getElementById('tts-speaker');
+    if (!speakerSelect) {
+        return;
+    }
+    const options = Array.isArray(ttsVoiceOptionsCache[normalized]) && ttsVoiceOptionsCache[normalized].length
+        ? ttsVoiceOptionsCache[normalized]
+        : (Array.isArray(ttsVoiceOptionsCache.sherpa_onnx_vits) ? ttsVoiceOptionsCache.sherpa_onnx_vits : []);
+    speakerSelect.innerHTML = options.map((item) => (
+        `<option value="${item.id}">${item.label}</option>`
+    )).join('');
+    if (!options.length) {
+        speakerSelect.innerHTML = '<option value="0">默认音色</option>';
+    }
+}
+
+function syncTtsPanels(engine) {
+    const normalized = normalizeTtsEngine(engine) || 'sherpa_onnx_vits';
+    const sherpaPanel = document.getElementById('tts-sherpa-panel');
+    const edgePanel = document.getElementById('tts-edge-panel');
+    if (sherpaPanel) {
+        sherpaPanel.style.display = (normalized === 'sherpa_onnx_vits' || normalized === 'sherpa_onnx_vits_zh_en') ? '' : 'none';
+    }
+    if (edgePanel) {
+        edgePanel.style.display = normalized === 'edgetts' ? '' : 'none';
+    }
+}
+
+function getTtsEngineDescription(engine) {
+    const normalized = normalizeTtsEngine(engine) || 'sherpa_onnx_vits';
+    const descriptions = {
+        sherpa_onnx_vits: 'Local Chinese TTS, model k2-fsa/sherpa-onnx-vits-zh-ll.',
+        sherpa_onnx_vits_zh_en: 'Local zh/en TTS, model vits-melo-tts-zh_en.',
+        edgetts: 'Online TTS for English words and mixed zh/en speech.'
+    };
+    return descriptions[normalized] || normalized;
+}
+
+async function appendUserDialog(text, source, meta) {
+    const sessionId = ensureSession();
+    if (!sessionId) {
+        return;
+    }
+
+    const content = (text || '').trim();
+    if (!content) {
+        return;
+    }
+
+    await postJson('/api/dialog/add', {
+        sessionid: sessionId,
+        role: 'user',
+        source: source || 'text',
+        meta: meta || {},
+        text: content
+    });
+    await loadConversationHistory();
+}
+
+async function loadSettings() {
+    const response = await fetch('/api/runtime/config');
+    const result = await response.json();
+    if (result.code !== 0) {
+        updateStatus(`加载设置失败：${result.msg}`);
+        return;
+    }
+
+    const data = result.data || {};
+    const tts = (((data.tts || {}).sherpa_onnx_vits) || {});
+    const ttsZhEn = (((data.tts || {}).sherpa_onnx_vits_zh_en) || {});
+    const edge = (((data.tts || {}).edgetts) || {});
+    const asr = (((data.asr || {}).paraformer) || {});
+    const llmPayload = data.llm || {};
+    const providers = data.providers || {};
+    const meta = data.meta || {};
+    const voiceOptions = Array.isArray(meta.tts_voice_options) ? meta.tts_voice_options : [];
+    const voiceOptionsByEngine = meta.tts_voice_options_by_engine || {};
+    const engineOptions = Array.isArray(meta.tts_engine_options) && meta.tts_engine_options.length
+        ? meta.tts_engine_options
+        : [
+            { id: 'sherpa_onnx_vits', label: 'Sherpa-ONNX', desc: '本地中文 TTS。' },
+            { id: 'sherpa_onnx_vits_zh_en', label: 'Sherpa-ONNX 中英', desc: '本地中英 TTS。' },
+            { id: 'edgetts', label: 'EdgeTTS', desc: '在线 TTS。' }
+        ];
+    const llmModeOptions = Array.isArray(meta.llm_mode_options) && meta.llm_mode_options.length
+        ? meta.llm_mode_options
+        : [
+            { id: 'openai_chat', label: 'OpenAI Responses', desc: 'OpenAI Responses 协议。' },
+            { id: 'chat_completions_api', label: 'OpenAI Chat Completions', desc: 'OpenAI chat/completions 协议。' },
+            { id: 'lm_studio_api', label: 'LM Studio API', desc: 'LM Studio 原生 /api/v1/chat 接口。' }
+        ];
+    const avatarOptions = Array.isArray(meta.avatar_options) ? meta.avatar_options : [];
+    const modelDescriptions = meta.model_descriptions || {};
+    const currentEngine = normalizeTtsEngine(providers.tts || 'sherpa_onnx_vits') || 'sherpa_onnx_vits';
+    const currentLlmMode = normalizeLlmMode(providers.llm || meta.current_llm_mode || 'openai_chat') || 'openai_chat';
+    ttsConfigCache = {
+        sherpa_onnx_vits: tts,
+        sherpa_onnx_vits_zh_en: ttsZhEn,
+        edgetts: edge
+    };
+    ttsVoiceOptionsCache = {
+        sherpa_onnx_vits: Array.isArray(voiceOptionsByEngine.sherpa_onnx_vits) ? voiceOptionsByEngine.sherpa_onnx_vits : voiceOptions,
+        sherpa_onnx_vits_zh_en: Array.isArray(voiceOptionsByEngine.sherpa_onnx_vits_zh_en) ? voiceOptionsByEngine.sherpa_onnx_vits_zh_en : [],
+        edgetts: Array.isArray(voiceOptionsByEngine.edgetts) ? voiceOptionsByEngine.edgetts : []
+    };
+    llmModeOptionsCache = llmModeOptions;
+    avatarOptionsCache = avatarOptions;
+    currentAvatarIdCache = String(meta.current_avatar_id || (avatarOptions[0] && avatarOptions[0].id) || '');
+    avatarSilenceGateCache = {};
+    avatarOptions.forEach((item) => {
+        if (item && item.id) {
+            avatarSilenceGateCache[item.id] = Boolean(item.silence_gate_enabled);
+        }
+    });
+    llmConfigCache = {
+        openai_chat: llmPayload.openai_chat || {},
+        chat_completions_api: llmPayload.chat_completions_api || {},
+        lm_studio_api: llmPayload.lm_studio_api || {}
+    };
+    const asrModelNote = document.getElementById('asr-model-note');
+    if (asrModelNote) {
+        asrModelNote.textContent = `${modelDescriptions.asr || 'Paraformer-large'}，热词走模型约束，近音词走结果后处理。`;
+    }
+
+    const engineSelect = document.getElementById('tts-engine');
+    if (engineSelect && engineOptions.length) {
+        engineSelect.innerHTML = engineOptions.map((item) => (
+            `<option value="${item.id}" title="${item.desc || ''}">${item.label}</option>`
+        )).join('');
+        Array.from(engineSelect.options || []).forEach((option) => {
+            option.title = getTtsEngineDescription(option.value);
+        });
+    }
+    renderAvatarTable();
+    const llmSelect = document.getElementById('llm-provider');
+    if (llmSelect && llmModeOptions.length) {
+        llmSelect.innerHTML = llmModeOptions.map((item) => (
+            `<option value="${item.id}" title="${item.desc || ''}">${item.label}</option>`
+        )).join('');
+    }
+
+    document.getElementById('tts-engine').value = currentEngine;
+    applyTtsVoiceOptions(currentEngine);
+    applyTtsFormValues(currentEngine);
+    if (llmSelect) {
+        llmSelect.value = currentLlmMode;
+        llmSelect.dataset.currentMode = currentLlmMode;
+    }
+    applyLlmFormValues(currentLlmMode);
+    document.getElementById('asr-device').value = asr.device || 'cuda:0';
+    document.getElementById('asr-batch-size').value = String(asr.batch_size_s ?? 300);
+    document.getElementById('asr-hotwords').value = asr.hotwords || '';
+    document.getElementById('asr-phonetic-replacements').value = asr.phonetic_replacements || '';
+    updateSettingsSummary(currentEngine, currentLlmMode, currentAvatarIdCache);
+}
+async function saveSettings() {
+    const selectedEngine = normalizeTtsEngine(document.getElementById('tts-engine').value) || 'sherpa_onnx_vits';
+    const selectedLlmMode = normalizeLlmMode(document.getElementById('llm-provider').value) || 'openai_chat';
+    const selectedAvatarId = getSelectedAvatarId();
+    const avatarSilenceGateByAvatar = {};
+    (Array.isArray(avatarOptionsCache) ? avatarOptionsCache : []).forEach((item) => {
+        if (!item || !item.id) {
+            return;
+        }
+        const checkbox = document.querySelector(`input.avatar-silence-gate[data-avatar-id="${item.id}"]`);
+        avatarSilenceGateByAvatar[item.id] = Boolean(checkbox ? checkbox.checked : item.silence_gate_enabled);
+    });
+    const currentLlmConfig = llmConfigCache[selectedLlmMode] || {};
+    const llmPayload = {
+        base_url: document.getElementById('llm-base-url').value.trim(),
+        model: document.getElementById('llm-model').value.trim(),
+        timeout_s: parseInt(document.getElementById('llm-timeout').value, 10),
+        api_key: document.getElementById('llm-api-key').value,
+        system_prompt_zh: document.getElementById('llm-system-prompt').value,
+        stream: currentLlmConfig.stream ?? false
+    };
+    const payload = {
+        providers: {
+            tts: selectedEngine,
+            llm: selectedLlmMode
+        },
+        avatar_id: selectedAvatarId,
+        avatar_silence_gate_by_avatar: avatarSilenceGateByAvatar,
+        tts: {
+            edgetts: {
+                voice_name: document.getElementById('edge-voice-name').value.trim(),
+                speed: document.getElementById('edge-speed').value.trim()
+            }
+        },
+        asr: {
+            paraformer: {
+                device: document.getElementById('asr-device').value.trim(),
+                batch_size_s: parseInt(document.getElementById('asr-batch-size').value, 10),
+                hotwords: document.getElementById('asr-hotwords').value,
+                phonetic_replacements: document.getElementById('asr-phonetic-replacements').value
+            }
+        },
+        llm: {
+            [selectedLlmMode]: Object.assign({}, currentLlmConfig, llmPayload)
+        }
+    };
+
+    if (selectedEngine === 'sherpa_onnx_vits' || selectedEngine === 'sherpa_onnx_vits_zh_en') {
+        payload.tts[selectedEngine] = {
+            speaker_id: parseInt(document.getElementById('tts-speaker').value, 10),
+            speed: parseFloat(document.getElementById('tts-speed').value),
+            num_threads: parseInt(document.getElementById('tts-threads').value, 10),
+            provider: 'cpu'
+        };
+    }
+
+    updateStatus('Saving settings...');
+    const result = await postJson('/api/runtime/config', payload);
+    updateStatus(result.code === 0 ? 'Settings saved.' : `Save failed: ${result.msg}`);
+    if (result.code === 0 && result.data) {
+        const savedData = result.data || {};
+        ttsConfigCache = {
+            sherpa_onnx_vits: (((savedData.tts || {}).sherpa_onnx_vits) || {}),
+            sherpa_onnx_vits_zh_en: (((savedData.tts || {}).sherpa_onnx_vits_zh_en) || {}),
+            edgetts: (((savedData.tts || {}).edgetts) || {})
+        };
+        llmConfigCache = {
+            openai_chat: (((savedData.llm || {}).openai_chat) || llmConfigCache.openai_chat || {}),
+            chat_completions_api: (((savedData.llm || {}).chat_completions_api) || llmConfigCache.chat_completions_api || {}),
+            lm_studio_api: (((savedData.llm || {}).lm_studio_api) || llmConfigCache.lm_studio_api || {})
+        };
+        const savedMeta = savedData.meta || {};
+        currentAvatarIdCache = String(savedMeta.current_avatar_id || selectedAvatarId || currentAvatarIdCache || '');
+        const savedAvatarOptions = Array.isArray(savedMeta.avatar_options) ? savedMeta.avatar_options : [];
+        avatarSilenceGateCache = {};
+        savedAvatarOptions.forEach((item) => {
+            if (item && item.id) {
+                avatarSilenceGateCache[item.id] = Boolean(item.silence_gate_enabled);
+            }
+        });
+    }
+    renderAvatarTable();
+    closeSettingsModal();
+}
+async function sendChatText(text) {
+    const sessionId = ensureSession();
+    if (!sessionId) {
+        return;
+    }
+
+    const content = (text || '').trim();
+    if (!content) {
+        updateStatus('Please input text or finish ASR first.');
+        return;
+    }
+
+    updateStatus('Sending to LLM...');
+    const result = await postJson('/human', {
+        text: content,
+        type: 'chat',
+        interrupt: true,
+        sessionid: sessionId,
+        skip_dialog_log: true,
+        continuous_dialogue: continuousDialogueEnabled
+    });
+    updateStatus(result.code === 0 ? 'Sent to LLM.' : `Send failed: ${result.msg}`);
+    await loadConversationHistory();
+}
+
+async function transcribeBlob(blob, filename) {
+    const asrStart = performance.now();
+    updateStatus('正在上传音频到本地 Paraformer...');
+    const form = new FormData();
+    form.append('file', blob, filename);
+
+    let response;
+    try {
+        response = await fetch('/api/asr/transcribe', {
+            method: 'POST',
+            body: form
+        });
+    } catch (error) {
+        updateStatus(`ASR 请求失败：${error}`);
+        throw error;
+    }
+    let result;
+    try {
+        result = await response.json();
+    } catch (error) {
+        updateStatus(`ASR 响应解析失败：${error}`);
+        throw error;
+    }
+    if (result.code !== 0) {
+        throw new Error(result.msg || 'ASR 失败');
+    }
+
+    const text = (result.data && result.data.text) || '';
+    const messageInput = document.getElementById('message');
+    messageInput.value = text;
+    messageInput.focus();
+    pendingInputSource = text ? 'asr' : 'text';
+    const asrElapsed = ((performance.now() - asrStart) / 1000).toFixed(2);
+    pendingInputMeta = text ? { asr_elapsed: asrElapsed } : {};
+    updateStatus(text
+        ? `ASR complete in ${asrElapsed}s. Text has been filled into the input box, please click send.`
+        : `ASR complete in ${asrElapsed}s, but nothing was recognized.`);
+}
+
+async function startMicRecording() {
+    if (isRecording) {
+        return;
+    }
+    if (!ensureSession()) {
+        return;
+    }
+
+    const mimeTypes = [
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/mp4'
+    ];
+    const selectedMimeType = mimeTypes.find((item) => window.MediaRecorder && MediaRecorder.isTypeSupported(item)) || '';
+
+    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaRecorder = selectedMimeType ? new MediaRecorder(mediaStream, { mimeType: selectedMimeType }) : new MediaRecorder(mediaStream);
+    recordedChunks = [];
+    isRecording = true;
+    const holdToTalkButton = document.getElementById('hold-to-talk');
+    holdToTalkButton.classList.add('recording');
+    holdToTalkButton.textContent = 'Release to transcribe';
+
+    mediaRecorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+            recordedChunks.push(event.data);
+        }
+    };
+
+    mediaRecorder.onstop = async () => {
+        try {
+            const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+            await transcribeBlob(blob, 'recording.webm');
+        } catch (error) {
+            updateStatus(`ASR failed: ${error}`);
+        } finally {
+            if (mediaStream) {
+                mediaStream.getTracks().forEach((track) => track.stop());
+            }
+            isRecording = false;
+            mediaStream = null;
+            recordedChunks = [];
+            holdToTalkButton.classList.remove('recording');
+            holdToTalkButton.textContent = 'Hold to talk';
+        }
+    };
+
+    mediaRecorder.start();
+    updateStatus('Recording started. Release to transcribe.');
+}
+function stopMicRecording() {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
+    }
+}
+
+async function uploadAudioFile() {
+    if (!ensureSession()) {
+        return;
+    }
+
+    const input = document.getElementById('audio-file');
+    if (!input.files || !input.files.length) {
+        updateStatus('Please choose an audio file first.');
+        return;
+    }
+
+    const file = input.files[0];
+    await transcribeBlob(file, file.name || 'upload-audio');
+    input.value = '';
+}
+
+const messageInput = document.getElementById('message');
+messageInput.addEventListener('input', () => {
+    pendingInputSource = 'text';
+    pendingInputMeta = {};
+});
+messageInput.addEventListener('keydown', async (event) => {
+    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        await appendUserDialog(messageInput.value, pendingInputSource, pendingInputMeta);
+        pendingInputSource = 'text';
+        pendingInputMeta = {};
+        await sendChatText(messageInput.value);
+        return;
+    }
+    if (event.key === 'Escape') {
+        messageInput.value = '';
+    }
+});
+document.getElementById('send-text').addEventListener('click', async () => {
+    await appendUserDialog(messageInput.value, pendingInputSource, pendingInputMeta);
+    pendingInputSource = 'text';
+    pendingInputMeta = {};
+    await sendChatText(messageInput.value);
+});
+document.getElementById('open-settings').addEventListener('click', openSettingsModal);
+document.getElementById('close-settings').addEventListener('click', closeSettingsModal);
+document.getElementById('settings-backdrop').addEventListener('click', (event) => {
+    if (event.target === document.getElementById('settings-backdrop')) {
+        closeSettingsModal();
+    }
+});
+document.querySelectorAll('.tab-button').forEach((button) => {
+    button.addEventListener('click', () => switchSettingsTab(button.dataset.tab));
+});
+    const ttsEngineSelect = document.getElementById('tts-engine');
+    if (ttsEngineSelect) {
+        ttsEngineSelect.addEventListener('change', () => {
+            const selected = ttsEngineSelect.value;
+            syncTtsPanels(selected);
+            applyTtsVoiceOptions(selected);
+            applyTtsFormValues(selected);
+            const options = Array.from(ttsEngineSelect.options || []);
+            const current = options.find((item) => item.value === selected);
+            const descNode = document.getElementById('tts-engine-desc');
+            const noteNode = document.getElementById('tts-model-note');
+            if (descNode) {
+                descNode.textContent = current ? current.title : "";
+            }
+            if (noteNode) {
+                noteNode.textContent = `当前 TTS：${getTtsEngineDescription(selected)}`;
+            }
+        });
+    }
+const holdToTalkButton = document.getElementById('hold-to-talk');
+const audioFileInput = document.getElementById('audio-file');
+document.getElementById('pick-audio').addEventListener('click', () => {
+    audioFileInput.click();
+});
+audioFileInput.addEventListener('change', async () => {
+    await uploadAudioFile();
+});
+holdToTalkButton.addEventListener('pointerdown', async (event) => {
+    event.preventDefault();
+    try {
+        await startMicRecording();
+    } catch (error) {
+        updateStatus(`启动录音失败：${error}`);
+    }
+});
+['pointerup', 'pointercancel', 'lostpointercapture', 'pointerleave'].forEach((eventName) => {
+    holdToTalkButton.addEventListener(eventName, () => {
+        if (isRecording) {
+            stopMicRecording();
+        }
+    });
+});
+holdToTalkButton.addEventListener('contextmenu', (event) => event.preventDefault());
+document.getElementById('save-settings').addEventListener('click', saveSettings);
+document.getElementById('reload-settings').addEventListener('click', loadSettings);
+const continuousDialogueToggle = document.getElementById('continuous-dialogue-toggle');
+if (continuousDialogueToggle) {
+    continuousDialogueToggle.addEventListener('change', () => {
+        setContinuousDialogueEnabled(continuousDialogueToggle.checked);
+    });
+    loadContinuousDialogueSetting();
+}
+document.getElementById('clear-dialog-history').addEventListener('click', () => {
+    clearConversationHistory().catch((error) => {
+        updateStatus(`清空对话失败：${error}`);
+    });
+});
+
+window.addEventListener('livetalking:sessionchange', (event) => {
+    document.getElementById('session-text').textContent = String((event.detail && event.detail.sessionid) || 0);
+});
+
+window.addEventListener('livetalking:connectionstate', function (event) {
+    var detail = event.detail || {};
+    var state = detail.state || 'unknown';
+
+    if (state === 'ready' || state === 'connected') {
+        setConnectionBadge('Connected');
+        updateStatus('WebRTC connected. You can record, upload audio, or type text.');
+        return;
+    }
+
+    if (state === 'negotiating' || state === 'starting' || state === 'connecting' || state === 'ice-checking') {
+        setConnectionBadge('Connecting');
+        updateStatus('WebRTC connecting...');
+        return;
+    }
+
+    if (state === 'stopped' || state === 'closed' || state === 'disconnected' || state === 'ice-disconnected') {
+        setConnectionBadge('Disconnected');
+        updateStatus('WebRTC disconnected. Refresh the page or wait for reconnect.');
+        return;
+    }
+
+    if (state === 'failed' || state === 'error' || state === 'ice-failed') {
+        setConnectionBadge('Failed');
+        updateStatus('WebRTC connection failed. Check browser console and server logs.');
+    }
+});
+
+loadSettings().catch((error) => updateStatus(`Load settings failed: ${error}`));
+loadConversationHistory().catch(() => {});
+ensureConversationPolling();
+setTimeout(autoStartWebRTC, 0);
+</script>
+</body>
+</html>

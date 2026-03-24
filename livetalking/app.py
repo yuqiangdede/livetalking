@@ -1,0 +1,940 @@
+﻿###############################################################################
+#  Copyright (C) 2024 LiveTalking@lipku https://github.com/lipku/LiveTalking
+#  email: lipku@foxmail.com
+#
+#  Licensed under the Apache License, Version 2.0 (the "License");
+#  you may not use this file except in compliance with the License.
+#  You may obtain a copy of the License at
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
+###############################################################################
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import ipaddress
+import json
+import logging
+import random
+import re
+import socket
+import os
+import time
+from dataclasses import asdict
+from pathlib import Path
+from typing import Dict
+
+import aiohttp_cors
+import torch.multiprocessing as mp
+from aioice import ice as aioice_ice
+from aiohttp import web
+from aiortc import RTCPeerConnection, RTCSessionDescription, RTCRtpSender
+from .core.base_real import BaseReal
+from .config.app_config import (
+    apply_config_to_opt,
+    load_app_config,
+    resolve_project_path,
+    save_app_config,
+)
+from .providers.llm_client import configure_llm, llm_response
+from .providers.local_asr import ParaformerProvider, decode_audio_to_pcm16
+from .utils.app_logger import logger
+from .providers.sherpa_tts import SherpaOnnxVitsTTS
+from .realtime.webrtc import HumanPlayer
+
+
+nerfreals: Dict[int, BaseReal] = {}
+pcs = set()
+opt = None
+model = None
+avatar = None
+app_config = None
+speech_recognizer: ParaformerProvider | None = None
+_ORIGINAL_GET_HOST_ADDRESSES = aioice_ice.get_host_addresses
+_preferred_ice_addresses: list[str] | None = None
+
+logging.getLogger("aioice").setLevel(logging.INFO)
+logging.getLogger("aiortc").setLevel(logging.INFO)
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+class InvalidSessionError(RuntimeError):
+    pass
+
+
+SUPPORTED_TTS_ENGINES = {
+    "sherpa_onnx_vits",
+    "sherpa_onnx_vits_zh_en",
+    "edgetts",
+}
+
+SUPPORTED_LLM_MODES = {
+    "openai_chat",
+    "chat_completions_api",
+    "lm_studio_api",
+}
+
+SHERPA_TTS_ENGINES = {
+    "sherpa_onnx_vits",
+    "sherpa_onnx_vits_zh_en",
+}
+
+TTS_VOICE_OPTIONS_BY_ENGINE = {
+    "sherpa_onnx_vits": [
+        {"id": 0, "label": "音色 1"},
+        {"id": 1, "label": "音色 2"},
+        {"id": 2, "label": "音色 3"},
+        {"id": 3, "label": "音色 4"},
+        {"id": 4, "label": "音色 5"},
+    ],
+    "sherpa_onnx_vits_zh_en": [
+        {"id": 1, "label": "默认音色"},
+    ],
+    "edgetts": [],
+}
+
+def get_tts_voice_options(engine: str | None) -> list[dict]:
+    normalized = normalize_tts_engine(engine)
+    return list(TTS_VOICE_OPTIONS_BY_ENGINE.get(normalized, TTS_VOICE_OPTIONS_BY_ENGINE["sherpa_onnx_vits"]))
+
+TTS_ENGINE_OPTIONS = [
+    {"id": "sherpa_onnx_vits", "label": "Sherpa-ONNX", "desc": "本地中文 TTS，模型为 k2-fsa/sherpa-onnx-vits-zh-ll。"},
+    {"id": "sherpa_onnx_vits_zh_en", "label": "Sherpa-ONNX 中英", "desc": "本地中英 TTS，模型为 vits-melo-tts-zh_en。"},
+    {"id": "edgetts", "label": "EdgeTTS", "desc": "在线 TTS，适合英文单词和中英混读。"},
+]
+
+LLM_MODE_OPTIONS = [
+    {"id": "openai_chat", "label": "OpenAI Responses", "desc": "OpenAI Responses 协议。"},
+    {"id": "chat_completions_api", "label": "OpenAI Chat Completions", "desc": "OpenAI chat/completions 协议。"},
+    {"id": "lm_studio_api", "label": "LM Studio API", "desc": "LM Studio 原生 /api/v1/chat 接口。"},
+]
+
+
+def normalize_tts_engine(value: str | None) -> str:
+    engine = (value or "").strip().lower().replace("-", "_")
+    if engine in {"", "sherpa_onnx_vits"}:
+        return "sherpa_onnx_vits"
+    if engine in {"sherpa_onnx_vits_zh_en", "vits_melo_tts_zh_en", "sherpa_onnx_melo_tts_zh_en"}:
+        return "sherpa_onnx_vits_zh_en"
+    if engine == "edgetts":
+        return "edgetts"
+    return engine
+
+
+def normalize_llm_mode(value: str | None) -> str:
+    mode = (value or "").strip().lower().replace("-", "_")
+    if mode in {"", "openai_chat", "openai_responses", "responses", "responses_api"}:
+        return "openai_chat"
+    if mode in {"chat_completions_api", "chat_completions"}:
+        return "chat_completions_api"
+    if mode in {"lm_studio_api", "lm_studio", "lmstudio", "lmstudio_api"}:
+        return "lm_studio_api"
+    return "openai_chat"
+
+
+def get_llm_mode_meta(mode: str | None) -> dict:
+    normalized = normalize_llm_mode(mode)
+    for item in LLM_MODE_OPTIONS:
+        if item["id"] == normalized:
+            return item
+    return {"id": normalized, "label": normalized, "desc": normalized}
+
+
+def get_current_llm_config():
+    if app_config is None:
+        return None
+    mode = normalize_llm_mode(getattr(app_config.providers, "llm", "openai_chat"))
+    return getattr(app_config.llm, mode, app_config.llm.openai_chat)
+
+
+def get_current_llm_model_description() -> str:
+    if app_config is None:
+        return "OpenAI Responses"
+    mode = normalize_llm_mode(getattr(app_config.providers, "llm", "openai_chat"))
+    return str(get_llm_mode_meta(mode).get("label") or mode)
+
+
+def get_tts_engine_meta(engine: str | None) -> dict:
+    normalized = normalize_tts_engine(engine)
+    for item in TTS_ENGINE_OPTIONS:
+        if item["id"] == normalized:
+            return item
+    return {"id": normalized, "label": normalized, "desc": normalized}
+
+
+def get_current_tts_model_description() -> str:
+    if app_config is None:
+        return "k2-fsa/sherpa-onnx-vits-zh-ll"
+    engine = getattr(app_config.providers, "tts", "sherpa_onnx_vits")
+    meta = get_tts_engine_meta(engine)
+    return str(meta.get("desc") or meta.get("label") or engine)
+
+
+def list_available_avatar_ids() -> list[dict]:
+    avatar_root = ""
+    if app_config is not None:
+        avatar_root = resolve_project_path(app_config, getattr(app_config.avatar.wav2lip, "avatar_dir", ""))
+    if not avatar_root:
+        avatar_root = getattr(opt, "AVATAR_DIR", "")
+    silence_gate_map = {}
+    if app_config is not None:
+        silence_gate_map = getattr(app_config.avatar.wav2lip, "silence_gate_by_avatar", {}) or {}
+    items: list[dict] = []
+    if not avatar_root or not os.path.isdir(avatar_root):
+        return items
+
+    for entry in sorted(os.scandir(avatar_root), key=lambda item: item.name.lower()):
+        if not entry.is_dir():
+            continue
+        items.append({
+            "id": entry.name,
+            "label": entry.name,
+            "silence_gate_enabled": bool(
+                silence_gate_map.get(
+                    entry.name,
+                    getattr(app_config.avatar.wav2lip, "silence_gate_enabled", False) if app_config else False,
+                )
+            ),
+        })
+    return items
+def randN(length: int) -> int:
+    minimum = pow(10, length - 1)
+    maximum = pow(10, length)
+    return random.randint(minimum, maximum - 1)
+
+
+def json_response(payload: dict, status: int = 200) -> web.Response:
+    return web.Response(
+        status=status,
+        content_type="application/json",
+        text=json.dumps(payload, ensure_ascii=False),
+    )
+
+
+def patched_get_host_addresses(use_ipv4: bool, use_ipv6: bool) -> list[str]:
+    if use_ipv4 and _preferred_ice_addresses:
+        return list(_preferred_ice_addresses)
+    return _ORIGINAL_GET_HOST_ADDRESSES(use_ipv4, use_ipv6)
+
+
+aioice_ice.get_host_addresses = patched_get_host_addresses
+
+
+def get_session_real(sessionid: int) -> BaseReal:
+    if sessionid <= 0:
+        raise InvalidSessionError("invalid sessionid: 0, start WebRTC first")
+
+    nerfreal = nerfreals.get(sessionid)
+    if nerfreal is None:
+        raise InvalidSessionError(f"invalid sessionid: {sessionid}, session not ready or already closed")
+    return nerfreal
+
+
+def resolve_preferred_ice_addresses(request: web.Request) -> list[str]:
+    host = request.host.split(":")[0].strip().lower()
+    if host in {"127.0.0.1", "localhost"}:
+        return ["127.0.0.1"]
+
+    preferred: list[str] = []
+    try:
+        for family, _, _, _, sockaddr in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            address = sockaddr[0]
+            ip = ipaddress.ip_address(address)
+            if ip.is_loopback or ip.is_link_local:
+                continue
+            if address not in preferred:
+                preferred.append(address)
+    except socket.gaierror:
+        pass
+
+    if host and host not in {"0.0.0.0"}:
+        try:
+            ip = ipaddress.ip_address(host)
+            if ip.version == 4 and not ip.is_loopback and not ip.is_link_local and host not in preferred:
+                preferred.insert(0, host)
+        except ValueError:
+            pass
+
+    if preferred:
+        return preferred
+    return _ORIGINAL_GET_HOST_ADDRESSES(use_ipv4=True, use_ipv6=False)
+
+
+def should_force_loopback_mdns(request: web.Request) -> bool:
+    host = request.host.split(":")[0].strip().lower()
+    return host in {"127.0.0.1", "localhost"}
+
+
+def rewrite_local_mdns_candidates(sdp: str) -> str:
+    return re.sub(r"(?<=\s)([0-9a-f-]+\.local)(?=\s)", "127.0.0.1", sdp, flags=re.IGNORECASE)
+
+
+def build_nerfreal(sessionid: int) -> BaseReal:
+    opt.sessionid = sessionid
+    from .avatar.wav2lip_real import LipReal
+    from .avatar.wav2lip_real import load_avatar
+
+    avatar_data = load_avatar(opt.avatar_id, opt.AVATAR_DIR)
+    return LipReal(opt, model, avatar_data)
+
+
+async def offer(request: web.Request) -> web.Response:
+    global _preferred_ice_addresses
+    params = await request.json()
+    raw_sdp = params["sdp"]
+    if should_force_loopback_mdns(request):
+        rewritten_sdp = rewrite_local_mdns_candidates(raw_sdp)
+        if rewritten_sdp != raw_sdp:
+            logger.info("Rewrote localhost mDNS ICE candidates to 127.0.0.1 for local debugging")
+        raw_sdp = rewritten_sdp
+    remote_offer = RTCSessionDescription(sdp=raw_sdp, type=params["type"])
+    _preferred_ice_addresses = resolve_preferred_ice_addresses(request)
+    logger.info("Preferred ICE addresses for %s -> %s", request.host, _preferred_ice_addresses)
+    offer_candidates = [
+        line.strip()
+        for line in raw_sdp.splitlines()
+        if line.startswith("a=candidate:") or line.startswith("c=")
+    ]
+    logger.info("Remote offer candidates: %s", offer_candidates)
+
+    sessionid = randN(6)
+    nerfreals[sessionid] = None
+    logger.info("sessionid=%d, session num=%d", sessionid, len(nerfreals))
+    nerfreal = await asyncio.get_event_loop().run_in_executor(None, build_nerfreal, sessionid)
+    nerfreals[sessionid] = nerfreal
+
+    pc = RTCPeerConnection()
+    pcs.add(pc)
+
+    @pc.on("connectionstatechange")
+    async def on_connectionstatechange():
+        logger.info("Connection state is %s", pc.connectionState)
+        if pc.connectionState in {"failed", "closed"}:
+            await pc.close()
+            pcs.discard(pc)
+            nerfreals.pop(sessionid, None)
+
+    @pc.on("iceconnectionstatechange")
+    async def on_iceconnectionstatechange():
+        logger.info("ICE connection state is %s", pc.iceConnectionState)
+
+    @pc.on("icegatheringstatechange")
+    async def on_icegatheringstatechange():
+        logger.info("ICE gathering state is %s", pc.iceGatheringState)
+
+    player = HumanPlayer(nerfreals[sessionid])
+    pc.addTrack(player.audio)
+    pc.addTrack(player.video)
+
+    capabilities = RTCRtpSender.getCapabilities("video")
+    preferences = [codec for codec in capabilities.codecs if codec.name in {"H264", "VP8", "rtx"}]
+    pc.getTransceivers()[1].setCodecPreferences(preferences)
+
+    await pc.setRemoteDescription(remote_offer)
+    answer = await pc.createAnswer()
+    await pc.setLocalDescription(answer)
+    answer_candidates = [
+        line.strip()
+        for line in pc.localDescription.sdp.splitlines()
+        if line.startswith("a=candidate:") or line.startswith("c=")
+    ]
+    logger.info(
+        "Created answer for sessionid=%d, iceGatheringState=%s, iceConnectionState=%s, candidates=%s",
+        sessionid,
+        pc.iceGatheringState,
+        pc.iceConnectionState,
+        answer_candidates,
+    )
+
+    return json_response(
+        {
+            "sdp": pc.localDescription.sdp,
+            "type": pc.localDescription.type,
+            "sessionid": sessionid,
+        }
+    )
+
+
+async def human(request: web.Request) -> web.Response:
+    try:
+        params = await request.json()
+        sessionid = int(params.get("sessionid", 0))
+        nerfreal = get_session_real(sessionid)
+
+        if params.get("interrupt"):
+            nerfreal.flush_talk()
+
+        if not params.get("skip_dialog_log") and hasattr(nerfreal, "append_dialog"):
+            nerfreal.append_dialog(
+                "user",
+                params.get("text", ""),
+                str(params.get("type", "chat")),
+                params.get("meta", {}) if isinstance(params.get("meta", {}), dict) else {},
+            )
+
+        if params["type"] == "echo":
+            nerfreal.put_msg_txt(params["text"])
+        elif params["type"] == "chat":
+            continuous_dialogue = bool(params.get("continuous_dialogue", False))
+            dialog_start_ts = time.perf_counter()
+            asyncio.get_event_loop().run_in_executor(
+                None,
+                safe_llm_response,
+                params["text"],
+                nerfreal,
+                continuous_dialogue,
+                dialog_start_ts,
+            )
+
+        return json_response({"code": 0, "msg": "ok"})
+    except InvalidSessionError as exc:
+        return json_response({"code": -1, "msg": str(exc)}, status=400)
+    except Exception as exc:
+        logger.exception("human route failed")
+        return json_response({"code": -1, "msg": str(exc)}, status=500)
+
+
+async def interrupt_talk(request: web.Request) -> web.Response:
+    try:
+        params = await request.json()
+        sessionid = int(params.get("sessionid", 0))
+        get_session_real(sessionid).flush_talk()
+        return json_response({"code": 0, "msg": "ok"})
+    except InvalidSessionError as exc:
+        return json_response({"code": -1, "msg": str(exc)}, status=400)
+    except Exception as exc:
+        logger.exception("interrupt_talk route failed")
+        return json_response({"code": -1, "msg": str(exc)}, status=500)
+
+
+async def humanaudio(request: web.Request) -> web.Response:
+    try:
+        form = await request.post()
+        sessionid = int(form.get("sessionid", 0))
+        fileobj = form["file"]
+        filebytes = fileobj.file.read()
+        get_session_real(sessionid).put_audio_file(filebytes)
+        return json_response({"code": 0, "msg": "ok"})
+    except InvalidSessionError as exc:
+        return json_response({"code": -1, "msg": str(exc)}, status=400)
+    except Exception as exc:
+        logger.exception("humanaudio route failed")
+        return json_response({"code": -1, "msg": str(exc)}, status=500)
+
+
+async def transcribe_audio(request: web.Request) -> web.Response:
+    try:
+        if speech_recognizer is None:
+            raise RuntimeError("Paraformer ASR is not initialized")
+
+        start = time.perf_counter()
+        form = await request.post()
+        if "file" not in form:
+            raise RuntimeError("missing form field: file")
+
+        fileobj = form["file"]
+        filebytes = fileobj.file.read()
+        logger.info(
+            "ASR upload received filename=%s size=%s bytes",
+            getattr(fileobj, "filename", ""),
+            len(filebytes),
+        )
+        decode_start = time.perf_counter()
+        try:
+            pcm_s16le, sample_rate = await asyncio.get_event_loop().run_in_executor(None, decode_audio_to_pcm16, filebytes)
+        except Exception as exc:
+            logger.warning("ASR decode failed filename=%s: %s", getattr(fileobj, "filename", ""), exc)
+            return json_response({"code": -1, "msg": f"audio decode failed: {exc}"}, status=400)
+        logger.info(
+            "ASR decode done in %.3fs, sample_rate=%s, pcm_samples=%s",
+            time.perf_counter() - decode_start,
+            sample_rate,
+            len(pcm_s16le),
+        )
+        infer_start = time.perf_counter()
+        result = await asyncio.get_event_loop().run_in_executor(
+            None,
+            speech_recognizer.transcribe_pcm16,
+            pcm_s16le,
+            sample_rate,
+        )
+        logger.info(
+            "ASR transcribe done in %.3fs, sample_rate=%s, pcm_samples=%s, text=%s",
+            time.perf_counter() - infer_start,
+            sample_rate,
+            len(pcm_s16le),
+            result.get("text", ""),
+        )
+        logger.info("ASR total elapsed %.3fs", time.perf_counter() - start)
+        return json_response({"code": 0, "msg": "ok", "data": result})
+    except Exception as exc:
+        logger.exception("transcribe_audio route failed")
+        return json_response({"code": -1, "msg": str(exc)}, status=500)
+
+
+async def set_silence_gate(request: web.Request) -> web.Response:
+    try:
+        params = await request.json()
+        sessionid = int(params.get("sessionid", 0))
+        enabled = bool(params.get("enabled", False))
+        nerfreal = get_session_real(sessionid)
+        nerfreal.set_silence_gate(enabled)
+        return json_response({"code": 0, "msg": "ok", "data": {"enabled": enabled}})
+    except InvalidSessionError as exc:
+        return json_response({"code": -1, "msg": str(exc)}, status=400)
+    except Exception as exc:
+        logger.exception("set_silence_gate route failed")
+        return json_response({"code": -1, "msg": str(exc)}, status=500)
+
+
+async def record(request: web.Request) -> web.Response:
+    try:
+        params = await request.json()
+        sessionid = int(params.get("sessionid", 0))
+        nerfreal = get_session_real(sessionid)
+        if params["type"] == "start_record":
+            nerfreal.start_recording()
+        elif params["type"] == "end_record":
+            nerfreal.stop_recording()
+        return json_response({"code": 0, "msg": "ok"})
+    except InvalidSessionError as exc:
+        return json_response({"code": -1, "msg": str(exc)}, status=400)
+    except Exception as exc:
+        logger.exception("record route failed")
+        return json_response({"code": -1, "msg": str(exc)}, status=500)
+
+
+async def is_speaking(request: web.Request) -> web.Response:
+    try:
+        params = await request.json()
+        sessionid = int(params.get("sessionid", 0))
+        return json_response({"code": 0, "data": get_session_real(sessionid).is_speaking()})
+    except InvalidSessionError as exc:
+        return json_response({"code": -1, "msg": str(exc)}, status=400)
+
+
+async def add_dialog_entry(request: web.Request) -> web.Response:
+    try:
+        params = await request.json()
+        sessionid = int(params.get("sessionid", 0))
+        nerfreal = get_session_real(sessionid)
+        if hasattr(nerfreal, "append_dialog"):
+            nerfreal.append_dialog(
+                str(params.get("role", "user")),
+                str(params.get("text", "")),
+                str(params.get("source", "")),
+                params.get("meta", {}) if isinstance(params.get("meta", {}), dict) else {},
+            )
+        return json_response({"code": 0, "msg": "ok"})
+    except InvalidSessionError as exc:
+        return json_response({"code": -1, "msg": str(exc)}, status=400)
+    except Exception as exc:
+        logger.exception("add_dialog_entry route failed")
+        return json_response({"code": -1, "msg": str(exc)}, status=500)
+
+
+async def get_dialog_history(request: web.Request) -> web.Response:
+    try:
+        sessionid = int(request.query.get("sessionid", "0"))
+        limit = int(request.query.get("limit", "50"))
+        nerfreal = get_session_real(sessionid)
+        history = nerfreal.get_dialog_history(limit) if hasattr(nerfreal, "get_dialog_history") else []
+        return json_response({"code": 0, "msg": "ok", "data": history})
+    except InvalidSessionError as exc:
+        return json_response({"code": -1, "msg": str(exc)}, status=400)
+    except Exception as exc:
+        logger.exception("get_dialog_history route failed")
+        return json_response({"code": -1, "msg": str(exc)}, status=500)
+
+
+async def clear_dialog_history(request: web.Request) -> web.Response:
+    try:
+        params = await request.json()
+        sessionid = int(params.get("sessionid", 0))
+        nerfreal = get_session_real(sessionid)
+        if hasattr(nerfreal, "clear_dialog_history"):
+            nerfreal.clear_dialog_history()
+        return json_response({"code": 0, "msg": "ok"})
+    except InvalidSessionError as exc:
+        return json_response({"code": -1, "msg": str(exc)}, status=400)
+    except Exception as exc:
+        logger.exception("clear_dialog_history route failed")
+        return json_response({"code": -1, "msg": str(exc)}, status=500)
+
+
+def runtime_config_payload() -> dict:
+    if app_config is None:
+        raise RuntimeError("app config is not initialized")
+
+    payload = asdict(app_config)
+    payload.pop("project_root", None)
+    payload["meta"] = {
+        "config_path": getattr(opt, "CONFIG_PATH", ""),
+        "tts_voice_options": get_tts_voice_options(app_config.providers.tts),
+        "tts_voice_options_by_engine": TTS_VOICE_OPTIONS_BY_ENGINE,
+        "tts_engine_options": TTS_ENGINE_OPTIONS,
+        "llm_mode_options": LLM_MODE_OPTIONS,
+        "avatar_options": list_available_avatar_ids(),
+        "model_descriptions": {
+            "asr": "Paraformer-large + punctuation restoration",
+            "tts": get_current_tts_model_description(),
+            "llm": get_current_llm_model_description(),
+        },
+        "current_tts_engine": getattr(app_config.providers, "tts", "sherpa_onnx_vits"),
+        "current_llm_mode": normalize_llm_mode(getattr(app_config.providers, "llm", "openai_chat")),
+        "current_avatar_id": getattr(app_config.avatar.wav2lip, "avatar_id", getattr(opt, "avatar_id", "avatar_1")),
+        "current_silence_gate_enabled": bool(
+            getattr(app_config.avatar.wav2lip, "silence_gate_by_avatar", {}).get(
+                getattr(app_config.avatar.wav2lip, "avatar_id", getattr(opt, "avatar_id", "avatar_1")),
+                getattr(app_config.avatar.wav2lip, "silence_gate_enabled", False),
+            )
+        ),
+    }
+    return payload
+
+
+def apply_runtime_settings(payload: dict) -> None:
+    global speech_recognizer
+    if app_config is None or opt is None:
+        raise RuntimeError("runtime is not initialized")
+
+    providers_config = payload.get("providers", {})
+    tts_payload = payload.get("tts", {})
+    edge_config = tts_payload.get("edgetts", {})
+    llm_payload = payload.get("llm", {})
+    asr_config = payload.get("asr", {}).get("paraformer", {})
+    avatar_id = str(payload.get("avatar_id", getattr(app_config.avatar.wav2lip, "avatar_id", "avatar_1"))).strip()
+    silence_gate_by_avatar = dict(getattr(app_config.avatar.wav2lip, "silence_gate_by_avatar", {}) or {})
+    if "avatar_silence_gate_by_avatar" in payload and isinstance(payload.get("avatar_silence_gate_by_avatar"), dict):
+        incoming_map = payload.get("avatar_silence_gate_by_avatar", {})
+        silence_gate_by_avatar = {str(key): bool(value) for key, value in incoming_map.items()}
+    legacy_silence_gate = bool(payload.get("silence_gate_enabled", getattr(app_config.avatar.wav2lip, "silence_gate_enabled", False)))
+    tts_engine_changed = False
+    avatar_changed = False
+    selected_tts = normalize_tts_engine(str(providers_config.get("tts", app_config.providers.tts)) if "tts" in providers_config else app_config.providers.tts)
+    selected_llm = normalize_llm_mode(str(providers_config.get("llm", app_config.providers.llm)) if "llm" in providers_config else app_config.providers.llm)
+
+    if "tts" in providers_config:
+        if selected_tts not in SUPPORTED_TTS_ENGINES:
+            raise ValueError(f"Unsupported TTS provider: {selected_tts}")
+        tts_engine_changed = selected_tts != app_config.providers.tts
+        app_config.providers.tts = selected_tts
+        opt.tts = selected_tts
+
+    if "llm" in providers_config:
+        if selected_llm not in SUPPORTED_LLM_MODES:
+            raise ValueError(f"Unsupported LLM provider: {selected_llm}")
+        app_config.providers.llm = selected_llm
+
+    if avatar_id:
+        available_avatar_ids = {item["id"] for item in list_available_avatar_ids()}
+        if available_avatar_ids and avatar_id not in available_avatar_ids:
+            raise ValueError(f"Unsupported avatar id: {avatar_id}")
+        avatar_changed = avatar_id != getattr(app_config.avatar.wav2lip, "avatar_id", "")
+        app_config.avatar.wav2lip.avatar_id = avatar_id
+        opt.avatar_id = avatar_id
+
+    if not silence_gate_by_avatar and payload.get("silence_gate_enabled") is not None:
+        silence_gate_by_avatar[avatar_id] = legacy_silence_gate
+    app_config.avatar.wav2lip.silence_gate_by_avatar = silence_gate_by_avatar
+    app_config.avatar.wav2lip.silence_gate_enabled = bool(silence_gate_by_avatar.get(avatar_id, legacy_silence_gate))
+    opt.SILENCE_GATE_ENABLED = bool(silence_gate_by_avatar.get(avatar_id, legacy_silence_gate))
+
+    sherpa_config = tts_payload.get(selected_tts, {}) if selected_tts in SHERPA_TTS_ENGINES else {}
+    if sherpa_config:
+        if "speaker_id" in sherpa_config:
+            speaker_id = int(sherpa_config["speaker_id"])
+            getattr(app_config.tts, selected_tts).speaker_id = speaker_id
+            opt.TTS_SPEAKER_ID = speaker_id
+        if "speed" in sherpa_config:
+            speed = float(sherpa_config["speed"])
+            getattr(app_config.tts, selected_tts).speed = speed
+            opt.TTS_SPEED = speed
+        if "num_threads" in sherpa_config:
+            num_threads = int(sherpa_config["num_threads"])
+            getattr(app_config.tts, selected_tts).num_threads = num_threads
+            opt.TTS_NUM_THREADS = num_threads
+            SherpaOnnxVitsTTS.reset_shared_tts()
+        if "provider" in sherpa_config:
+            provider = str(sherpa_config["provider"])
+            getattr(app_config.tts, selected_tts).provider = provider
+            opt.TTS_PROVIDER = provider
+            SherpaOnnxVitsTTS.reset_shared_tts()
+
+    if edge_config:
+        if "voice_name" in edge_config:
+            app_config.tts.edgetts.voice_name = str(edge_config["voice_name"])
+        if "speed" in edge_config:
+            app_config.tts.edgetts.speed = str(edge_config["speed"])
+
+    llm_config = llm_payload.get(selected_llm, {})
+    target_llm_config = getattr(app_config.llm, selected_llm, None)
+    if target_llm_config is not None and llm_config:
+        for field_name in ("base_url", "api_key", "model", "system_prompt_zh", "system_prompt_en"):
+            if field_name in llm_config:
+                setattr(target_llm_config, field_name, str(llm_config[field_name]))
+        for field_name in ("timeout_s", "web_search_max_keyword"):
+            if field_name in llm_config and hasattr(target_llm_config, field_name):
+                setattr(target_llm_config, field_name, int(llm_config[field_name]))
+        if "web_search_enabled" in llm_config and hasattr(target_llm_config, "web_search_enabled"):
+            target_llm_config.web_search_enabled = bool(llm_config["web_search_enabled"])
+        if "stream" in llm_config and hasattr(target_llm_config, "stream"):
+            target_llm_config.stream = bool(llm_config["stream"])
+    if target_llm_config is not None:
+        configure_llm(target_llm_config, selected_llm)
+
+    if asr_config:
+        should_reload_asr = False
+        hotwords_changed = False
+        phonetic_replacements_changed = False
+        if "batch_size_s" in asr_config:
+            batch_size_s = int(asr_config["batch_size_s"])
+            app_config.asr.paraformer.batch_size_s = batch_size_s
+            opt.ASR_BATCH_SIZE_S = batch_size_s
+            if speech_recognizer is not None:
+                speech_recognizer.batch_size_s = batch_size_s
+        if "device" in asr_config:
+            device = str(asr_config["device"])
+            if device != app_config.asr.paraformer.device:
+                app_config.asr.paraformer.device = device
+                opt.ASR_DEVICE = device
+                should_reload_asr = True
+        if "model_dir" in asr_config:
+            model_dir = str(asr_config["model_dir"])
+            if model_dir != app_config.asr.paraformer.model_dir:
+                app_config.asr.paraformer.model_dir = model_dir
+                opt.ASR_MODEL_DIR = model_dir
+                should_reload_asr = True
+        if "punc_model_dir" in asr_config:
+            punc_model_dir = str(asr_config["punc_model_dir"])
+            if punc_model_dir != app_config.asr.paraformer.punc_model_dir:
+                app_config.asr.paraformer.punc_model_dir = punc_model_dir
+                opt.ASR_PUNC_MODEL_DIR = punc_model_dir
+                should_reload_asr = True
+        if "hotwords" in asr_config:
+            hotwords = str(asr_config["hotwords"])
+            if hotwords != app_config.asr.paraformer.hotwords:
+                app_config.asr.paraformer.hotwords = hotwords
+                opt.ASR_HOTWORDS = hotwords
+                hotwords_changed = True
+        if "phonetic_replacements" in asr_config:
+            phonetic_replacements = str(asr_config["phonetic_replacements"])
+            if phonetic_replacements != app_config.asr.paraformer.phonetic_replacements:
+                app_config.asr.paraformer.phonetic_replacements = phonetic_replacements
+                opt.ASR_PHONETIC_REPLACEMENTS = phonetic_replacements
+                phonetic_replacements_changed = True
+        if should_reload_asr:
+            speech_recognizer = ParaformerProvider(
+                model_dir=opt.ASR_MODEL_DIR,
+                device=opt.ASR_DEVICE,
+                batch_size_s=opt.ASR_BATCH_SIZE_S,
+                hotwords=app_config.asr.paraformer.hotwords,
+                phonetic_replacements=app_config.asr.paraformer.phonetic_replacements,
+                punc_model_dir=opt.ASR_PUNC_MODEL_DIR,
+                temp_dir=opt.RUNTIME_TEMP_DIR,
+            )
+            speech_recognizer.warmup()
+        elif speech_recognizer is not None and (hotwords_changed or phonetic_replacements_changed):
+            speech_recognizer.update_asr_rules(
+                hotwords=app_config.asr.paraformer.hotwords,
+                phonetic_replacements=app_config.asr.paraformer.phonetic_replacements,
+            )
+
+    apply_config_to_opt(opt, app_config)
+
+    if tts_engine_changed:
+        for nerfreal in list(nerfreals.values()):
+            if nerfreal is None or not hasattr(nerfreal, "reload_tts"):
+                continue
+            nerfreal.reload_tts()
+    else:
+        for nerfreal in list(nerfreals.values()):
+            if nerfreal is None or not hasattr(nerfreal, "tts"):
+                continue
+            if hasattr(nerfreal.tts, "speaker_id"):
+                nerfreal.tts.speaker_id = getattr(opt, "TTS_SPEAKER_ID", 0)
+            if hasattr(nerfreal.tts, "speed"):
+                nerfreal.tts.speed = getattr(opt, "TTS_SPEED", 1.0)
+            if hasattr(nerfreal.tts, "num_threads"):
+                nerfreal.tts.num_threads = getattr(opt, "TTS_NUM_THREADS", 1)
+            if hasattr(nerfreal.tts, "provider"):
+                nerfreal.tts.provider = getattr(opt, "TTS_PROVIDER", "")
+            if hasattr(nerfreal.tts, "_tts") and nerfreal.tts._tts is None:
+                continue
+            if hasattr(nerfreal.tts, "_tts"):
+                nerfreal.tts._tts = None
+
+    if avatar_changed:
+        for nerfreal in list(nerfreals.values()):
+            if nerfreal is None or not hasattr(nerfreal, "reload_avatar"):
+                continue
+            nerfreal.reload_avatar(avatar_id)
+    for nerfreal in list(nerfreals.values()):
+        if nerfreal is None or not hasattr(nerfreal, "set_silence_gate"):
+            continue
+        nerfreal.set_silence_gate(bool(silence_gate_by_avatar.get(avatar_id, legacy_silence_gate)))
+
+    save_app_config(app_config, getattr(opt, "CONFIG_PATH", None))
+
+
+async def get_runtime_config(request: web.Request) -> web.Response:
+    try:
+        return json_response({"code": 0, "msg": "ok", "data": runtime_config_payload()})
+    except Exception as exc:
+        logger.exception("get_runtime_config failed")
+        return json_response({"code": -1, "msg": str(exc)}, status=500)
+
+
+async def update_runtime_config(request: web.Request) -> web.Response:
+    try:
+        params = await request.json()
+        apply_runtime_settings(params)
+        return json_response({"code": 0, "msg": "ok", "data": runtime_config_payload()})
+    except Exception as exc:
+        logger.exception("update_runtime_config failed")
+        return json_response({"code": -1, "msg": str(exc)}, status=500)
+
+
+def safe_llm_response(
+    message: str,
+    nerfreal: BaseReal,
+    continuous_dialogue: bool = False,
+    dialog_start_ts: float | None = None,
+) -> None:
+    try:
+        llm_response(message, nerfreal, continuous_dialogue, dialog_start_ts)
+    except Exception:
+        logger.exception("llm_response failed")
+
+
+async def on_shutdown(app: web.Application) -> None:
+    coros = [pc.close() for pc in pcs]
+    await asyncio.gather(*coros)
+    pcs.clear()
+
+
+def build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", type=str, default="configs/app.yaml", help="project config yaml")
+    parser.add_argument("--fps", type=int, default=50, help="audio fps, must be 50")
+    parser.add_argument("-l", type=int, default=10)
+    parser.add_argument("-m", type=int, default=8)
+    parser.add_argument("-r", type=int, default=10)
+    parser.add_argument("--W", type=int, default=450, help="GUI width")
+    parser.add_argument("--H", type=int, default=450, help="GUI height")
+    parser.add_argument("--avatar_id", type=str, default=None, help="avatar id in data/avatars")
+    parser.add_argument("--batch_size", type=int, default=16, help="infer batch")
+    parser.add_argument("--tts", type=str, default="", help="TTS 引擎：sherpa_onnx_vits / sherpa_onnx_vits_zh_en / edgetts；留空时使用配置文件")
+    parser.add_argument("--model", type=str, default="wav2lip", help="only wav2lip is supported")
+    parser.add_argument("--listenport", type=int, default=8010, help="web listen port")
+    return parser
+
+
+def validate_supported_modes(args) -> None:
+    if args.model != "wav2lip":
+        raise ValueError("This build only supports --model wav2lip")
+    if getattr(args, "tts", ""):
+        tts_engine = normalize_tts_engine(args.tts)
+        if tts_engine not in SUPPORTED_TTS_ENGINES:
+            raise ValueError("This build only supports --tts sherpa_onnx_vits / sherpa_onnx_vits_zh_en / edgetts")
+        args.tts = tts_engine
+    args.transport = "webrtc"
+
+
+def bootstrap_runtime(args):
+    global app_config, opt, model, avatar, speech_recognizer
+
+    app_config = load_app_config(args.config, project_root=REPO_ROOT)
+    if not getattr(args, "tts", ""):
+        args.tts = app_config.providers.tts
+    validate_supported_modes(args)
+    opt = apply_config_to_opt(args, app_config)
+    opt.transport = "webrtc"
+    opt.customopt = []
+
+    configure_llm(get_current_llm_config(), normalize_llm_mode(getattr(app_config.providers, "llm", "openai_chat")))
+    speech_recognizer = ParaformerProvider(
+        model_dir=opt.ASR_MODEL_DIR,
+        device=opt.ASR_DEVICE,
+        batch_size_s=opt.ASR_BATCH_SIZE_S,
+        hotwords=app_config.asr.paraformer.hotwords,
+        phonetic_replacements=app_config.asr.paraformer.phonetic_replacements,
+        punc_model_dir=opt.ASR_PUNC_MODEL_DIR,
+        temp_dir=opt.RUNTIME_TEMP_DIR,
+    )
+    speech_recognizer.warmup()
+
+    from .avatar.wav2lip_real import load_model, warm_up
+
+    logger.info(opt)
+    model = load_model(opt.WAV2LIP_MODEL_PATH)
+    warm_up(opt.batch_size, model, opt.WAV2LIP_FACE_SIZE)
+
+
+def create_web_app() -> web.Application:
+    appasync = web.Application(client_max_size=1024**2 * 100)
+    appasync.on_shutdown.append(on_shutdown)
+    appasync.router.add_get("/", lambda request: web.FileResponse(REPO_ROOT / "web" / "index.html"))
+    appasync.router.add_get("/webrtcapi-asr.html", lambda request: web.FileResponse(REPO_ROOT / "web" / "webrtcapi-asr.html"))
+    appasync.router.add_post("/offer", offer)
+    appasync.router.add_post("/human", human)
+    appasync.router.add_post("/humanaudio", humanaudio)
+    appasync.router.add_post("/api/asr/transcribe", transcribe_audio)
+    appasync.router.add_post("/api/dialog/add", add_dialog_entry)
+    appasync.router.add_get("/api/dialog/history", get_dialog_history)
+    appasync.router.add_post("/api/dialog/clear", clear_dialog_history)
+    appasync.router.add_post("/set_silence_gate", set_silence_gate)
+    appasync.router.add_post("/record", record)
+    appasync.router.add_post("/interrupt_talk", interrupt_talk)
+    appasync.router.add_post("/is_speaking", is_speaking)
+    appasync.router.add_get("/api/runtime/config", get_runtime_config)
+    appasync.router.add_post("/api/runtime/config", update_runtime_config)
+    appasync.router.add_static("/web/", path=str(REPO_ROOT / "web"))
+
+    cors = aiohttp_cors.setup(
+        appasync,
+        defaults={
+            "*": aiohttp_cors.ResourceOptions(
+                allow_credentials=True,
+                expose_headers="*",
+                allow_headers="*",
+            )
+        },
+    )
+    for route in list(appasync.router.routes()):
+        cors.add(route)
+    return appasync
+
+
+def run_server(runner: web.AppRunner) -> None:
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(runner.setup())
+    site = web.TCPSite(runner, "0.0.0.0", opt.listenport)
+    loop.run_until_complete(site.start())
+    loop.run_forever()
+
+
+def main() -> None:
+    try:
+        mp.set_start_method("spawn")
+    except RuntimeError:
+        pass
+
+    args = build_arg_parser().parse_args()
+    bootstrap_runtime(args)
+    logger.info("start http server; http://<serverip>:%s/", opt.listenport)
+    logger.info("主控台页面: http://<serverip>:%s/", opt.listenport)
+    run_server(web.AppRunner(create_web_app()))
+
+
+if __name__ == "__main__":
+    main()

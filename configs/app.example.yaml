@@ -1,0 +1,81 @@
+providers:
+  asr: paraformer
+  tts: sherpa_onnx_vits
+  avatar: wav2lip
+  llm: lm_studio_api
+
+runtime:
+  temp_dir: runtime/tmp
+
+asr:
+  paraformer:
+    model_dir: models/asr/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch
+    punc_model_dir: models/asr/punc_ct-transformer_zh-cn-common-vocab272727-pytorch
+    device: cuda:0
+    batch_size_s: 300
+    hotwords: ""
+    phonetic_replacements: ""
+
+tts:
+  sherpa_onnx_vits:
+    model_dir: models/tts/sherpa-onnx-vits-zh-ll
+    provider: cpu
+    num_threads: 4
+    speaker_id: 4
+    speed: 1.0
+    rule_fsts:
+      - phone.fst
+      - date.fst
+      - number.fst
+  sherpa_onnx_vits_zh_en:
+    model_dir: models/tts/vits-melo-tts-zh_en
+    provider: cpu
+    num_threads: 2
+    speaker_id: 1
+    speed: 1.0
+    rule_fsts:
+      - phone.fst
+      - date.fst
+      - number.fst
+  edgetts:
+    voice_name: zh-CN-XiaoxiaoNeural
+    speed: 0%
+
+avatar:
+  wav2lip:
+    model_dir: models/avatar/wav2lip256
+    checkpoint_name: wav2lip256.pth
+    model_path: models/avatar/wav2lip256/wav2lip256.pth
+    avatar_dir: data/avatars
+    avatar_id: avatar_1
+    silence_gate_enabled: false
+    silence_gate_by_avatar: {}
+    legacy_model_paths:
+      - models/avatar/wav2lip/wav2lip.pth
+
+llm:
+  openai_chat:
+    base_url: https://api.openai.com/v1
+    api_key: ""
+    model: ""
+    timeout_s: 60
+    system_prompt_zh: 你是一个离线数字人助手。请在需要时使用中文简洁准确地回答。最多三句话，不要使用表情。
+    system_prompt_en: You are an offline digital human assistant. Reply concisely and accurately.
+    web_search_enabled: false
+    web_search_max_keyword: 2
+  chat_completions_api:
+    base_url: ""
+    api_key: ""
+    model: ""
+    timeout_s: 60
+    system_prompt_zh: 你是一个离线数字人助手。请在需要时使用中文简洁准确地回答。最多三句话，不要使用表情。
+    system_prompt_en: You are an offline digital human assistant. Reply concisely and accurately.
+    stream: false
+  lm_studio_api:
+    base_url: http://127.0.0.1:1234/api/v1/chat
+    api_key: ""
+    model: ""
+    timeout_s: 60
+    system_prompt_zh: 你是一个离线数字人助手。请在需要时使用中文简洁准确地回答。最多三句话，不要使用表情。
+    system_prompt_en: You are an offline digital human assistant. Reply concisely and accurately.
+    stream: false

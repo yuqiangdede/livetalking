@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "livetalking-local"
+version = "0.1.0"
+description = "Local wav2lip + paraformer + sherpa-onnx live talking stack."
+readme = "README.md"
+requires-python = ">=3.10,<3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "LiveTalking contributors" }]
+
+[tool.setuptools.packages.find]
+include = ["livetalking*", "wav2lip*"]
