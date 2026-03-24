@@ -17,10 +17,9 @@ data/*
 !data/.gitkeep
 !data/README.md
 
-models/**/._____temp/*
-models/**/._____temp/
-models/**/__pycache__/*
-models/**/__pycache__/
+models/*
+!models/.gitkeep
+!models/README.md
 
 configs/app.local.yaml
 *.log
@@ -28,3 +27,4 @@ configs/app.local.yaml
 temp*.aac
 temp*.mp4
 wav2lip/results/
+wav2lip/face_detection/detection/sfd/s3fd.pth
