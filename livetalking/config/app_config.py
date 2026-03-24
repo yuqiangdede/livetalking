@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import sqlite3
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,7 @@ import yaml
 
 DEFAULT_SYSTEM_PROMPT_ZH = "\u4f60\u662f\u4e00\u4e2a\u79bb\u7ebf\u6570\u5b57\u4eba\u52a9\u624b\u3002\u8bf7\u5728\u9700\u8981\u65f6\u4f7f\u7528\u4e2d\u6587\u7b80\u6d01\u51c6\u786e\u5730\u56de\u7b54\u3002\u6700\u591a\u4e09\u53e5\u8bdd\uff0c\u4e0d\u8981\u4f7f\u7528\u8868\u60c5\u3002"
 DEFAULT_SYSTEM_PROMPT_EN = "You are an offline digital human assistant. Reply concisely and accurately."
+SETTINGS_DB_RELATIVE_PATH = Path("data") / "runtime" / "settings.sqlite3"
 
 
 def repair_mojibake(text: str) -> str:
@@ -56,10 +58,108 @@ def ensure_directory(config: "AppConfig", path_value: str) -> str:
     return str(path)
 
 
+def get_settings_db_path(project_root: str | Path) -> Path:
+    return Path(project_root).resolve() / SETTINGS_DB_RELATIVE_PATH
+
+
+def _app_config_payload(config: AppConfig) -> dict[str, Any]:
+    payload = asdict(config)
+    payload.pop("project_root", None)
+    return payload
+
+
+def _build_app_config_from_payload(payload: dict[str, Any], project_root: Path) -> AppConfig:
+    tts_payload = payload["tts"]
+    return AppConfig(
+        providers=ProvidersConfig(**payload["providers"]),
+        runtime=RuntimeConfig(**payload["runtime"]),
+        asr=ASRConfig(paraformer=ASRParaformerConfig(**payload["asr"]["paraformer"])),
+        tts=TTSConfig(
+            vits_zh=TTSSherpaOnnxVitsConfig(**tts_payload["vits_zh"]),
+            vits_melo_zh_en=TTSSherpaOnnxVitsZhEnConfig(**tts_payload["vits_melo_zh_en"]),
+            edgetts=TTSEdgeTTSConfig(**tts_payload["edgetts"]),
+        ),
+        avatar=AvatarConfig(wav2lip=AvatarWav2LipConfig(**payload["avatar"]["wav2lip"])),
+        llm=LLMConfig(
+            openai_chat=LLMOpenAIChatConfig(**payload["llm"]["openai_chat"]),
+            chat_completions_api=LLMChatCompletionsAPIConfig(**payload["llm"]["chat_completions_api"]),
+            lm_studio_api=LLMLMStudioAPIConfig(**payload["llm"]["lm_studio_api"]),
+        ),
+        project_root=project_root,
+    )
+
+
+def _load_settings_snapshot(db_path: Path) -> dict[str, Any] | None:
+    if not db_path.exists():
+        return None
+    try:
+        with sqlite3.connect(db_path) as connection:
+            connection.row_factory = sqlite3.Row
+            row = connection.execute(
+                "SELECT config_json FROM runtime_settings WHERE id = 1"
+            ).fetchone()
+            if row is None:
+                return None
+            return json.loads(row["config_json"])
+    except (sqlite3.Error, json.JSONDecodeError, TypeError, ValueError):
+        return None
+
+
+def _strip_legacy_llm_fields(payload: dict[str, Any]) -> dict[str, Any]:
+    llm_payload = payload.get("llm")
+    if not isinstance(llm_payload, dict):
+        return payload
+
+    cleaned_llm_payload = copy.deepcopy(llm_payload)
+    openai_chat = cleaned_llm_payload.get("openai_chat")
+    if isinstance(openai_chat, dict):
+        openai_chat.pop("web_search_enabled", None)
+        openai_chat.pop("web_search_max_keyword", None)
+    chat_completions_api = cleaned_llm_payload.get("chat_completions_api")
+    if isinstance(chat_completions_api, dict):
+        chat_completions_api.pop("stream", None)
+    lm_studio_api = cleaned_llm_payload.get("lm_studio_api")
+    if isinstance(lm_studio_api, dict):
+        lm_studio_api.pop("stream", None)
+
+    cleaned_payload = copy.deepcopy(payload)
+    cleaned_payload["llm"] = cleaned_llm_payload
+    return cleaned_payload
+
+
+def _ensure_settings_schema(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS runtime_settings (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            config_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+
+def _save_settings_snapshot(db_path: Path, payload: dict[str, Any]) -> None:
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(db_path) as connection:
+        _ensure_settings_schema(connection)
+        connection.execute(
+            """
+            INSERT INTO runtime_settings (id, config_json, updated_at)
+            VALUES (1, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(id) DO UPDATE SET
+                config_json = excluded.config_json,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (json.dumps(payload, ensure_ascii=False),),
+        )
+        connection.commit()
+
+
 @dataclass
 class ProvidersConfig:
     asr: str = "paraformer"
-    tts: str = "sherpa_onnx_vits"
+    tts: str = "vits_zh"
     avatar: str = "wav2lip"
     llm: str = "lm_studio_api"
 
@@ -77,6 +177,12 @@ class ASRParaformerConfig:
     batch_size_s: int = 300
     hotwords: str = ""
     phonetic_replacements: str = ""
+    segment_by_silence: bool = True
+    segment_min_silence_ms: int = 650
+    segment_min_speech_ms: int = 240
+    segment_padding_ms: int = 120
+    segment_max_duration_s: float = 18.0
+    segment_split_overlap_ms: int = 150
 
 
 @dataclass
@@ -112,8 +218,8 @@ class TTSEdgeTTSConfig:
 
 @dataclass
 class TTSConfig:
-    sherpa_onnx_vits: TTSSherpaOnnxVitsConfig = field(default_factory=TTSSherpaOnnxVitsConfig)
-    sherpa_onnx_vits_zh_en: TTSSherpaOnnxVitsZhEnConfig = field(default_factory=TTSSherpaOnnxVitsZhEnConfig)
+    vits_zh: TTSSherpaOnnxVitsConfig = field(default_factory=TTSSherpaOnnxVitsConfig)
+    vits_melo_zh_en: TTSSherpaOnnxVitsZhEnConfig = field(default_factory=TTSSherpaOnnxVitsZhEnConfig)
     edgetts: TTSEdgeTTSConfig = field(default_factory=TTSEdgeTTSConfig)
 
 
@@ -142,8 +248,6 @@ class LLMOpenAIChatConfig:
     timeout_s: int = 60
     system_prompt_zh: str = DEFAULT_SYSTEM_PROMPT_ZH
     system_prompt_en: str = DEFAULT_SYSTEM_PROMPT_EN
-    web_search_enabled: bool = False
-    web_search_max_keyword: int = 2
 
 
 @dataclass
@@ -154,7 +258,6 @@ class LLMChatCompletionsAPIConfig:
     timeout_s: int = 60
     system_prompt_zh: str = DEFAULT_SYSTEM_PROMPT_ZH
     system_prompt_en: str = DEFAULT_SYSTEM_PROMPT_EN
-    stream: bool = False
 
 
 @dataclass
@@ -165,7 +268,6 @@ class LLMLMStudioAPIConfig:
     timeout_s: int = 60
     system_prompt_zh: str = DEFAULT_SYSTEM_PROMPT_ZH
     system_prompt_en: str = DEFAULT_SYSTEM_PROMPT_EN
-    stream: bool = False
 
 
 @dataclass
@@ -188,10 +290,10 @@ class AppConfig:
 
 def normalize_tts_engine(value: str) -> str:
     engine = str(value or "").strip().lower().replace("-", "_")
-    if engine in {"", "sherpa_onnx_vits"}:
-        return "sherpa_onnx_vits"
-    if engine in {"sherpa_onnx_vits_zh_en", "vits_melo_tts_zh_en", "sherpa_onnx_melo_tts_zh_en"}:
-        return "sherpa_onnx_vits_zh_en"
+    if engine in {"", "sherpa_onnx_vits", "vits_zh"}:
+        return "vits_zh"
+    if engine in {"sherpa_onnx_vits_zh_en", "vits_melo_tts_zh_en", "sherpa_onnx_melo_tts_zh_en", "vits_melo_zh_en"}:
+        return "vits_melo_zh_en"
     if engine == "edgetts":
         return "edgetts"
     return engine
@@ -211,6 +313,7 @@ def normalize_llm_mode(value: str) -> str:
 def load_app_config(config_path: str | None = None, project_root: str | Path | None = None) -> AppConfig:
     root = Path(project_root or Path.cwd()).resolve()
     path = Path(config_path or (root / "configs" / "app.yaml")).resolve()
+    db_path = get_settings_db_path(root)
 
     defaults = asdict(AppConfig())
     incoming: dict[str, Any] = {}
@@ -218,26 +321,14 @@ def load_app_config(config_path: str | None = None, project_root: str | Path | N
         incoming = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
     merged = _deep_merge(defaults, incoming)
+    stored_snapshot = _load_settings_snapshot(db_path)
+    if stored_snapshot:
+        merged = _deep_merge(merged, stored_snapshot)
+    merged = _strip_legacy_llm_fields(merged)
     for llm_key in ("openai_chat", "chat_completions_api", "lm_studio_api"):
         if llm_key in merged.get("llm", {}):
             merged["llm"][llm_key]["base_url"] = clean_base_url(merged["llm"][llm_key].get("base_url", ""))
-    config = AppConfig(
-        providers=ProvidersConfig(**merged["providers"]),
-        runtime=RuntimeConfig(**merged["runtime"]),
-        asr=ASRConfig(paraformer=ASRParaformerConfig(**merged["asr"]["paraformer"])),
-        tts=TTSConfig(
-            sherpa_onnx_vits=TTSSherpaOnnxVitsConfig(**merged["tts"]["sherpa_onnx_vits"]),
-            sherpa_onnx_vits_zh_en=TTSSherpaOnnxVitsZhEnConfig(**merged["tts"]["sherpa_onnx_vits_zh_en"]),
-            edgetts=TTSEdgeTTSConfig(**merged["tts"]["edgetts"]),
-        ),
-        avatar=AvatarConfig(wav2lip=AvatarWav2LipConfig(**merged["avatar"]["wav2lip"])),
-        llm=LLMConfig(
-            openai_chat=LLMOpenAIChatConfig(**merged["llm"]["openai_chat"]),
-            chat_completions_api=LLMChatCompletionsAPIConfig(**merged["llm"]["chat_completions_api"]),
-            lm_studio_api=LLMLMStudioAPIConfig(**merged["llm"]["lm_studio_api"]),
-        ),
-        project_root=root,
-    )
+    config = _build_app_config_from_payload(merged, root)
 
     config.providers.avatar = "wav2lip"
     config.providers.asr = "paraformer"
@@ -257,12 +348,10 @@ def load_app_config(config_path: str | None = None, project_root: str | Path | N
 
 
 def save_app_config(config: AppConfig, config_path: str | None = None) -> str:
-    path = Path(config_path or (config.project_root / "configs" / "app.yaml")).resolve()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = asdict(config)
-    payload.pop("project_root", None)
-    path.write_text(yaml.safe_dump(payload, allow_unicode=True, sort_keys=False), encoding="utf-8")
-    return str(path)
+    db_path = get_settings_db_path(config.project_root)
+    payload = _app_config_payload(config)
+    _save_settings_snapshot(db_path, payload)
+    return str(db_path)
 
 
 def apply_config_to_opt(opt, config: AppConfig):
@@ -286,10 +375,10 @@ def apply_config_to_opt(opt, config: AppConfig):
     opt.WAV2LIP_MODEL_PATH = resolve_project_path(config, config.avatar.wav2lip.model_path)
     opt.WAV2LIP_FACE_SIZE = 256
     opt.AVATAR_DIR = resolve_project_path(config, config.avatar.wav2lip.avatar_dir)
-    if opt.tts == "sherpa_onnx_vits":
-        sherpa_config = config.tts.sherpa_onnx_vits
-    elif opt.tts == "sherpa_onnx_vits_zh_en":
-        sherpa_config = config.tts.sherpa_onnx_vits_zh_en
+    if opt.tts == "vits_zh":
+        sherpa_config = config.tts.vits_zh
+    elif opt.tts == "vits_melo_zh_en":
+        sherpa_config = config.tts.vits_melo_zh_en
     else:
         sherpa_config = None
 

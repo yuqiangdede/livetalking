@@ -35,6 +35,9 @@ class BaseTTS:
         self.msgqueue = queue.Queue()
         self.state = State.RUNNING
 
+    def warmup(self) -> None:
+        return None
+
     def flush_talk(self) -> None:
         self.msgqueue.queue.clear()
         self.state = State.PAUSE

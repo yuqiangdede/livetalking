@@ -29,9 +29,11 @@ import os
 import time
 from dataclasses import asdict
 from pathlib import Path
-from typing import Dict
+from urllib.parse import quote
+from typing import Any, Dict
 
 import aiohttp_cors
+import cv2
 import torch.multiprocessing as mp
 from aioice import ice as aioice_ice
 from aiohttp import web
@@ -39,6 +41,7 @@ from aiortc import RTCPeerConnection, RTCSessionDescription, RTCRtpSender
 from .core.base_real import BaseReal
 from .config.app_config import (
     apply_config_to_opt,
+    get_settings_db_path,
     load_app_config,
     resolve_project_path,
     save_app_config,
@@ -57,6 +60,7 @@ model = None
 avatar = None
 app_config = None
 speech_recognizer: ParaformerProvider | None = None
+_avatar_cache: dict[tuple[str, str], tuple[Any, Any, Any, Any]] = {}
 _ORIGINAL_GET_HOST_ADDRESSES = aioice_ice.get_host_addresses
 _preferred_ice_addresses: list[str] | None = None
 
@@ -71,8 +75,8 @@ class InvalidSessionError(RuntimeError):
 
 
 SUPPORTED_TTS_ENGINES = {
-    "sherpa_onnx_vits",
-    "sherpa_onnx_vits_zh_en",
+    "vits_zh",
+    "vits_melo_zh_en",
     "edgetts",
 }
 
@@ -83,19 +87,19 @@ SUPPORTED_LLM_MODES = {
 }
 
 SHERPA_TTS_ENGINES = {
-    "sherpa_onnx_vits",
-    "sherpa_onnx_vits_zh_en",
+    "vits_zh",
+    "vits_melo_zh_en",
 }
 
 TTS_VOICE_OPTIONS_BY_ENGINE = {
-    "sherpa_onnx_vits": [
+    "vits_zh": [
         {"id": 0, "label": "音色 1"},
         {"id": 1, "label": "音色 2"},
         {"id": 2, "label": "音色 3"},
         {"id": 3, "label": "音色 4"},
         {"id": 4, "label": "音色 5"},
     ],
-    "sherpa_onnx_vits_zh_en": [
+    "vits_melo_zh_en": [
         {"id": 1, "label": "默认音色"},
     ],
     "edgetts": [],
@@ -103,11 +107,11 @@ TTS_VOICE_OPTIONS_BY_ENGINE = {
 
 def get_tts_voice_options(engine: str | None) -> list[dict]:
     normalized = normalize_tts_engine(engine)
-    return list(TTS_VOICE_OPTIONS_BY_ENGINE.get(normalized, TTS_VOICE_OPTIONS_BY_ENGINE["sherpa_onnx_vits"]))
+    return list(TTS_VOICE_OPTIONS_BY_ENGINE.get(normalized, TTS_VOICE_OPTIONS_BY_ENGINE["vits_zh"]))
 
 TTS_ENGINE_OPTIONS = [
-    {"id": "sherpa_onnx_vits", "label": "Sherpa-ONNX", "desc": "本地中文 TTS，模型为 k2-fsa/sherpa-onnx-vits-zh-ll。"},
-    {"id": "sherpa_onnx_vits_zh_en", "label": "Sherpa-ONNX 中英", "desc": "本地中英 TTS，模型为 vits-melo-tts-zh_en。"},
+    {"id": "vits_zh", "label": "vits-zh", "desc": "本地中文 TTS，模型为 k2-fsa/sherpa-onnx-vits-zh-ll。"},
+    {"id": "vits_melo_zh_en", "label": "vits-melo-zh_en", "desc": "本地中英 TTS，模型为 vits-melo-tts-zh_en。"},
     {"id": "edgetts", "label": "EdgeTTS", "desc": "在线 TTS，适合英文单词和中英混读。"},
 ]
 
@@ -120,10 +124,10 @@ LLM_MODE_OPTIONS = [
 
 def normalize_tts_engine(value: str | None) -> str:
     engine = (value or "").strip().lower().replace("-", "_")
-    if engine in {"", "sherpa_onnx_vits"}:
-        return "sherpa_onnx_vits"
-    if engine in {"sherpa_onnx_vits_zh_en", "vits_melo_tts_zh_en", "sherpa_onnx_melo_tts_zh_en"}:
-        return "sherpa_onnx_vits_zh_en"
+    if engine in {"", "sherpa_onnx_vits", "vits_zh"}:
+        return "vits_zh"
+    if engine in {"sherpa_onnx_vits_zh_en", "vits_melo_tts_zh_en", "sherpa_onnx_melo_tts_zh_en", "vits_melo_zh_en"}:
+        return "vits_melo_zh_en"
     if engine == "edgetts":
         return "edgetts"
     return engine
@@ -170,20 +174,84 @@ def get_tts_engine_meta(engine: str | None) -> dict:
     return {"id": normalized, "label": normalized, "desc": normalized}
 
 
+def _sorted_avatar_images(directory: str) -> list[Path]:
+    path = Path(directory)
+    if not path.is_dir():
+        return []
+    images = [item for item in path.iterdir() if item.is_file() and item.suffix.lower() in {".bmp", ".jpeg", ".jpg", ".png", ".webp"}]
+
+    def _image_sort_key(item: Path) -> tuple[int, int | str]:
+        try:
+            return (0, int(item.stem))
+        except ValueError:
+            return (1, item.stem.lower())
+
+    return sorted(images, key=_image_sort_key)
+
+
+def _resolve_avatar_thumbnail_path(avatar_root: str, avatar_id: str) -> str:
+    candidate_ids = [avatar_id]
+    if "_" in avatar_id:
+        candidate_ids.append(avatar_id.replace("_", ""))
+
+    avatar_path = ""
+    for candidate in candidate_ids:
+        if not candidate:
+            continue
+        maybe_path = os.path.join(avatar_root, candidate)
+        if os.path.isdir(maybe_path):
+            avatar_path = maybe_path
+            break
+    if not avatar_path:
+        return ""
+
+    full_imgs_path = os.path.join(avatar_path, "full_imgs")
+    full_images = _sorted_avatar_images(full_imgs_path)
+    if full_images:
+        return str(full_images[0])
+    return ""
+
+
+def _encode_thumbnail(image_path: str, max_size: int = 320) -> tuple[bytes, str]:
+    source = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
+    if source is None:
+        raise FileNotFoundError(image_path)
+
+    if source.ndim == 2:
+        source = cv2.cvtColor(source, cv2.COLOR_GRAY2BGR)
+    elif source.ndim == 3 and source.shape[2] == 4:
+        source = cv2.cvtColor(source, cv2.COLOR_BGRA2BGR)
+
+    height, width = source.shape[:2]
+    if height > 0 and width > 0:
+        scale = min(1.0, float(max_size) / float(max(height, width)))
+        if scale < 1.0:
+            new_width = max(1, int(width * scale))
+            new_height = max(1, int(height * scale))
+            source = cv2.resize(source, (new_width, new_height), interpolation=cv2.INTER_AREA)
+
+    suffix = Path(image_path).suffix.lower()
+    if suffix == ".png":
+        success, encoded = cv2.imencode(".png", source)
+        content_type = "image/png"
+    else:
+        success, encoded = cv2.imencode(".jpg", source, [int(cv2.IMWRITE_JPEG_QUALITY), 88])
+        content_type = "image/jpeg"
+    if not success:
+        raise RuntimeError(f"Failed to encode thumbnail for {image_path}")
+    return encoded.tobytes(), content_type
+
+
 def get_current_tts_model_description() -> str:
     if app_config is None:
         return "k2-fsa/sherpa-onnx-vits-zh-ll"
-    engine = getattr(app_config.providers, "tts", "sherpa_onnx_vits")
+    engine = getattr(app_config.providers, "tts", "vits_zh")
     meta = get_tts_engine_meta(engine)
     return str(meta.get("desc") or meta.get("label") or engine)
 
 
 def list_available_avatar_ids() -> list[dict]:
-    avatar_root = ""
-    if app_config is not None:
-        avatar_root = resolve_project_path(app_config, getattr(app_config.avatar.wav2lip, "avatar_dir", ""))
-    if not avatar_root:
-        avatar_root = getattr(opt, "AVATAR_DIR", "")
+    avatar_root = _resolve_avatar_root()
     silence_gate_map = {}
     if app_config is not None:
         silence_gate_map = getattr(app_config.avatar.wav2lip, "silence_gate_by_avatar", {}) or {}
@@ -197,6 +265,7 @@ def list_available_avatar_ids() -> list[dict]:
         items.append({
             "id": entry.name,
             "label": entry.name,
+            "thumbnail_url": f"/api/avatar-thumbnail/{quote(entry.name, safe='')}",
             "silence_gate_enabled": bool(
                 silence_gate_map.get(
                     entry.name,
@@ -205,6 +274,48 @@ def list_available_avatar_ids() -> list[dict]:
             ),
         })
     return items
+
+
+def _resolve_avatar_root() -> str:
+    avatar_root = ""
+    if app_config is not None:
+        avatar_root = resolve_project_path(app_config, getattr(app_config.avatar.wav2lip, "avatar_dir", ""))
+    if not avatar_root:
+        avatar_root = getattr(opt, "AVATAR_DIR", "")
+    return avatar_root
+
+
+def get_avatar_data(avatar_id: str) -> tuple[Any, Any, Any, Any]:
+    avatar_root = _resolve_avatar_root()
+    cache_key = (avatar_root, avatar_id)
+    cached_avatar = _avatar_cache.get(cache_key)
+    if cached_avatar is not None:
+        return cached_avatar
+
+    from .avatar.wav2lip_real import load_avatar
+
+    if not avatar_root:
+        avatar_root = "./data/avatars"
+    avatar_data = load_avatar(avatar_id, avatar_root)
+    _avatar_cache[cache_key] = avatar_data
+    return avatar_data
+
+
+def warmup_runtime_resources() -> None:
+    if app_config is None or opt is None:
+        return
+
+    avatar_id = getattr(app_config.avatar.wav2lip, "avatar_id", getattr(opt, "avatar_id", "avatar_1"))
+    try:
+        get_avatar_data(avatar_id)
+        logger.info("Avatar assets warmed up: avatar_id=%s", avatar_id)
+    except Exception as exc:
+        logger.warning("Avatar assets warmup skipped: avatar_id=%s error=%s", avatar_id, exc)
+
+    if opt.tts in SHERPA_TTS_ENGINES:
+        tts_warmup = SherpaOnnxVitsTTS(opt, None)
+        tts_warmup.warmup()
+        logger.info("TTS model warmed up: engine=%s", opt.tts)
 def randN(length: int) -> int:
     minimum = pow(10, length - 1)
     maximum = pow(10, length)
@@ -280,9 +391,8 @@ def rewrite_local_mdns_candidates(sdp: str) -> str:
 def build_nerfreal(sessionid: int) -> BaseReal:
     opt.sessionid = sessionid
     from .avatar.wav2lip_real import LipReal
-    from .avatar.wav2lip_real import load_avatar
 
-    avatar_data = load_avatar(opt.avatar_id, opt.AVATAR_DIR)
+    avatar_data = get_avatar_data(opt.avatar_id)
     return LipReal(opt, model, avatar_data)
 
 
@@ -578,6 +688,7 @@ def runtime_config_payload() -> dict:
     payload.pop("project_root", None)
     payload["meta"] = {
         "config_path": getattr(opt, "CONFIG_PATH", ""),
+        "settings_db_path": str(get_settings_db_path(REPO_ROOT)),
         "tts_voice_options": get_tts_voice_options(app_config.providers.tts),
         "tts_voice_options_by_engine": TTS_VOICE_OPTIONS_BY_ENGINE,
         "tts_engine_options": TTS_ENGINE_OPTIONS,
@@ -588,7 +699,7 @@ def runtime_config_payload() -> dict:
             "tts": get_current_tts_model_description(),
             "llm": get_current_llm_model_description(),
         },
-        "current_tts_engine": getattr(app_config.providers, "tts", "sherpa_onnx_vits"),
+        "current_tts_engine": getattr(app_config.providers, "tts", "vits_zh"),
         "current_llm_mode": normalize_llm_mode(getattr(app_config.providers, "llm", "openai_chat")),
         "current_avatar_id": getattr(app_config.avatar.wav2lip, "avatar_id", getattr(opt, "avatar_id", "avatar_1")),
         "current_silence_gate_enabled": bool(
@@ -681,13 +792,9 @@ def apply_runtime_settings(payload: dict) -> None:
         for field_name in ("base_url", "api_key", "model", "system_prompt_zh", "system_prompt_en"):
             if field_name in llm_config:
                 setattr(target_llm_config, field_name, str(llm_config[field_name]))
-        for field_name in ("timeout_s", "web_search_max_keyword"):
+        for field_name in ("timeout_s",):
             if field_name in llm_config and hasattr(target_llm_config, field_name):
                 setattr(target_llm_config, field_name, int(llm_config[field_name]))
-        if "web_search_enabled" in llm_config and hasattr(target_llm_config, "web_search_enabled"):
-            target_llm_config.web_search_enabled = bool(llm_config["web_search_enabled"])
-        if "stream" in llm_config and hasattr(target_llm_config, "stream"):
-            target_llm_config.stream = bool(llm_config["stream"])
     if target_llm_config is not None:
         configure_llm(target_llm_config, selected_llm)
 
@@ -695,6 +802,7 @@ def apply_runtime_settings(payload: dict) -> None:
         should_reload_asr = False
         hotwords_changed = False
         phonetic_replacements_changed = False
+        segment_settings_changed = False
         if "batch_size_s" in asr_config:
             batch_size_s = int(asr_config["batch_size_s"])
             app_config.asr.paraformer.batch_size_s = batch_size_s
@@ -731,6 +839,26 @@ def apply_runtime_settings(payload: dict) -> None:
                 app_config.asr.paraformer.phonetic_replacements = phonetic_replacements
                 opt.ASR_PHONETIC_REPLACEMENTS = phonetic_replacements
                 phonetic_replacements_changed = True
+        for field_name in (
+            "segment_by_silence",
+            "segment_min_silence_ms",
+            "segment_min_speech_ms",
+            "segment_padding_ms",
+            "segment_max_duration_s",
+            "segment_split_overlap_ms",
+        ):
+            if field_name in asr_config:
+                new_value = asr_config[field_name]
+                current_value = getattr(app_config.asr.paraformer, field_name)
+                if field_name == "segment_by_silence":
+                    new_value = bool(new_value)
+                elif field_name == "segment_max_duration_s":
+                    new_value = float(new_value)
+                else:
+                    new_value = int(new_value)
+                if new_value != current_value:
+                    setattr(app_config.asr.paraformer, field_name, new_value)
+                    segment_settings_changed = True
         if should_reload_asr:
             speech_recognizer = ParaformerProvider(
                 model_dir=opt.ASR_MODEL_DIR,
@@ -740,9 +868,24 @@ def apply_runtime_settings(payload: dict) -> None:
                 phonetic_replacements=app_config.asr.paraformer.phonetic_replacements,
                 punc_model_dir=opt.ASR_PUNC_MODEL_DIR,
                 temp_dir=opt.RUNTIME_TEMP_DIR,
+                segment_by_silence=app_config.asr.paraformer.segment_by_silence,
+                segment_min_silence_ms=app_config.asr.paraformer.segment_min_silence_ms,
+                segment_min_speech_ms=app_config.asr.paraformer.segment_min_speech_ms,
+                segment_padding_ms=app_config.asr.paraformer.segment_padding_ms,
+                segment_max_duration_s=app_config.asr.paraformer.segment_max_duration_s,
+                segment_split_overlap_ms=app_config.asr.paraformer.segment_split_overlap_ms,
             )
             speech_recognizer.warmup()
-        elif speech_recognizer is not None and (hotwords_changed or phonetic_replacements_changed):
+        elif speech_recognizer is not None and (
+            hotwords_changed or phonetic_replacements_changed or segment_settings_changed
+        ):
+            if segment_settings_changed:
+                speech_recognizer.segment_by_silence = app_config.asr.paraformer.segment_by_silence
+                speech_recognizer.segment_min_silence_ms = app_config.asr.paraformer.segment_min_silence_ms
+                speech_recognizer.segment_min_speech_ms = app_config.asr.paraformer.segment_min_speech_ms
+                speech_recognizer.segment_padding_ms = app_config.asr.paraformer.segment_padding_ms
+                speech_recognizer.segment_max_duration_s = app_config.asr.paraformer.segment_max_duration_s
+                speech_recognizer.segment_split_overlap_ms = app_config.asr.paraformer.segment_split_overlap_ms
             speech_recognizer.update_asr_rules(
                 hotwords=app_config.asr.paraformer.hotwords,
                 phonetic_replacements=app_config.asr.paraformer.phonetic_replacements,
@@ -793,6 +936,37 @@ async def get_runtime_config(request: web.Request) -> web.Response:
         return json_response({"code": -1, "msg": str(exc)}, status=500)
 
 
+async def get_avatar_thumbnail(request: web.Request) -> web.Response:
+    try:
+        avatar_id = str(request.match_info.get("avatar_id", "")).strip()
+        if not avatar_id:
+            return json_response({"code": -1, "msg": "Missing avatar id"}, status=400)
+
+        avatar_root = ""
+        if app_config is not None:
+            avatar_root = resolve_project_path(app_config, getattr(app_config.avatar.wav2lip, "avatar_dir", ""))
+        if not avatar_root:
+            avatar_root = getattr(opt, "AVATAR_DIR", "")
+        if not avatar_root or not os.path.isdir(avatar_root):
+            return json_response({"code": -1, "msg": "Avatar directory is unavailable"}, status=404)
+
+        thumbnail_path = _resolve_avatar_thumbnail_path(avatar_root, avatar_id)
+        if not thumbnail_path or not os.path.isfile(thumbnail_path):
+            return json_response({"code": -1, "msg": "Thumbnail not found"}, status=404)
+
+        image_bytes, content_type = _encode_thumbnail(thumbnail_path)
+        return web.Response(
+            body=image_bytes,
+            content_type=content_type,
+            headers={
+                "Cache-Control": "public, max-age=3600",
+            },
+        )
+    except Exception as exc:
+        logger.exception("get_avatar_thumbnail failed")
+        return json_response({"code": -1, "msg": str(exc)}, status=500)
+
+
 async def update_runtime_config(request: web.Request) -> web.Response:
     try:
         params = await request.json()
@@ -832,7 +1006,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--H", type=int, default=450, help="GUI height")
     parser.add_argument("--avatar_id", type=str, default=None, help="avatar id in data/avatars")
     parser.add_argument("--batch_size", type=int, default=16, help="infer batch")
-    parser.add_argument("--tts", type=str, default="", help="TTS 引擎：sherpa_onnx_vits / sherpa_onnx_vits_zh_en / edgetts；留空时使用配置文件")
+    parser.add_argument("--tts", type=str, default="", help="TTS 引擎：vits_zh / vits_melo_zh_en / edgetts；留空时使用配置文件")
     parser.add_argument("--model", type=str, default="wav2lip", help="only wav2lip is supported")
     parser.add_argument("--listenport", type=int, default=8010, help="web listen port")
     return parser
@@ -844,7 +1018,7 @@ def validate_supported_modes(args) -> None:
     if getattr(args, "tts", ""):
         tts_engine = normalize_tts_engine(args.tts)
         if tts_engine not in SUPPORTED_TTS_ENGINES:
-            raise ValueError("This build only supports --tts sherpa_onnx_vits / sherpa_onnx_vits_zh_en / edgetts")
+            raise ValueError("This build only supports --tts vits_zh / vits_melo_zh_en / edgetts")
         args.tts = tts_engine
     args.transport = "webrtc"
 
@@ -869,6 +1043,12 @@ def bootstrap_runtime(args):
         phonetic_replacements=app_config.asr.paraformer.phonetic_replacements,
         punc_model_dir=opt.ASR_PUNC_MODEL_DIR,
         temp_dir=opt.RUNTIME_TEMP_DIR,
+        segment_by_silence=app_config.asr.paraformer.segment_by_silence,
+        segment_min_silence_ms=app_config.asr.paraformer.segment_min_silence_ms,
+        segment_min_speech_ms=app_config.asr.paraformer.segment_min_speech_ms,
+        segment_padding_ms=app_config.asr.paraformer.segment_padding_ms,
+        segment_max_duration_s=app_config.asr.paraformer.segment_max_duration_s,
+        segment_split_overlap_ms=app_config.asr.paraformer.segment_split_overlap_ms,
     )
     speech_recognizer.warmup()
 
@@ -877,6 +1057,7 @@ def bootstrap_runtime(args):
     logger.info(opt)
     model = load_model(opt.WAV2LIP_MODEL_PATH)
     warm_up(opt.batch_size, model, opt.WAV2LIP_FACE_SIZE)
+    warmup_runtime_resources()
 
 
 def create_web_app() -> web.Application:
@@ -897,6 +1078,7 @@ def create_web_app() -> web.Application:
     appasync.router.add_post("/is_speaking", is_speaking)
     appasync.router.add_get("/api/runtime/config", get_runtime_config)
     appasync.router.add_post("/api/runtime/config", update_runtime_config)
+    appasync.router.add_get("/api/avatar-thumbnail/{avatar_id}", get_avatar_thumbnail)
     appasync.router.add_static("/web/", path=str(REPO_ROOT / "web"))
 
     cors = aiohttp_cors.setup(

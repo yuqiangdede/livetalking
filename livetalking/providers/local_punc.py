@@ -25,6 +25,7 @@ def _normalize_text(text: str) -> str:
     current = re.sub(r"\s+", " ", str(text or "")).strip()
     if not current:
         return ""
+    current = re.sub(r"(?i)<unk>", "", current)
     current = re.sub(r"(?<=[\u4e00-\u9fff])\s+(?=[\u4e00-\u9fff])", "", current)
     current = re.sub(r"\s+([，。！？!?、,.;:])", r"\1", current)
     return current
@@ -88,7 +89,7 @@ def _to_text(
         ans.append(token)
         if punctuation_id != underscore_id and 0 <= punctuation_id < len(id2punct):
             punct = id2punct[punctuation_id]
-            if punct:
+            if punct and punct != "<unk>":
                 ans.append(punct)
     return "".join(ans).strip()
 

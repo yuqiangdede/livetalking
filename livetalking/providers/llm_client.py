@@ -20,9 +20,6 @@ _llm_config = {
     "model": "",
     "timeout_s": 60,
     "system_prompt_zh": "\u4f60\u662f\u4e00\u4e2a\u79bb\u7ebf\u6570\u5b57\u4eba\u52a9\u624b\u3002\u8bf7\u5728\u9700\u8981\u65f6\u4f7f\u7528\u4e2d\u6587\u7b80\u6d01\u51c6\u786e\u5730\u56de\u7b54\u3002\u6700\u591a\u4e09\u53e5\u8bdd\uff0c\u4e0d\u8981\u4f7f\u7528\u8868\u60c5\u3002",
-    "web_search_enabled": False,
-    "web_search_max_keyword": 2,
-    "stream": False,
 }
 
 MAX_DIALOG_CONTEXT = 10
@@ -52,9 +49,6 @@ def configure_llm(config, mode: str = "openai_chat") -> None:
     _llm_config["model"] = config.model
     _llm_config["timeout_s"] = int(config.timeout_s)
     _llm_config["system_prompt_zh"] = config.system_prompt_zh
-    _llm_config["stream"] = bool(getattr(config, "stream", False))
-    _llm_config["web_search_enabled"] = bool(getattr(config, "web_search_enabled", False))
-    _llm_config["web_search_max_keyword"] = max(1, int(getattr(config, "web_search_max_keyword", 2)))
 
 
 def _headers() -> dict[str, str]:
@@ -172,14 +166,14 @@ def _payload(message: str, nerfreal: BaseReal, continuous_dialogue: bool) -> dic
                 },
                 *_build_dialog_messages(nerfreal, message, continuous_dialogue),
             ],
-            "stream": _llm_config["stream"],
+            "stream": True,
         }
 
     if _llm_config["mode"] == "lm_studio_api":
         payload = {
             "model": _llm_config["model"],
             "input": (message or "").strip(),
-            "stream": _llm_config["stream"],
+            "stream": True,
         }
         system_prompt = str(_llm_config["system_prompt_zh"] or "").strip()
         if system_prompt:
@@ -199,11 +193,6 @@ def _payload(message: str, nerfreal: BaseReal, continuous_dialogue: bool) -> dic
         "instructions": _llm_config["system_prompt_zh"],
         "stream": True,
     }
-    if _llm_config["web_search_enabled"]:
-        payload["tools"] = [{
-            "type": "web_search",
-            "max_keyword": _llm_config["web_search_max_keyword"],
-        }]
     return payload
 
 

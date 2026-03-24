@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8"/>
@@ -1139,13 +1139,13 @@ function normalizeLlmMode(mode) {
 }
 
 let ttsConfigCache = {
-    sherpa_onnx_vits: {},
-    sherpa_onnx_vits_zh_en: {},
+    vits_zh: {},
+    vits_melo_zh_en: {},
     edgetts: {}
 };
 let ttsVoiceOptionsCache = {
-    sherpa_onnx_vits: [],
-    sherpa_onnx_vits_zh_en: [],
+    vits_zh: [],
+    vits_melo_zh_en: [],
     edgetts: []
 };
 let llmConfigCache = {
@@ -1217,18 +1217,18 @@ function applyLlmFormValues(mode) {
 }
 
 function getSherpaTtsConfig(engine) {
-    const normalized = normalizeTtsEngine(engine) || 'sherpa_onnx_vits';
-    if (normalized === 'sherpa_onnx_vits_zh_en') {
-        return ttsConfigCache.sherpa_onnx_vits_zh_en || {};
+    const normalized = normalizeTtsEngine(engine) || 'vits_zh';
+    if (normalized === 'vits_melo_zh_en') {
+        return ttsConfigCache.vits_melo_zh_en || {};
     }
-    return ttsConfigCache.sherpa_onnx_vits || {};
+    return ttsConfigCache.vits_zh || {};
 }
 
 function applyTtsFormValues(engine) {
-    const normalized = normalizeTtsEngine(engine) || 'sherpa_onnx_vits';
-    const sherpa = (normalized === 'sherpa_onnx_vits' || normalized === 'sherpa_onnx_vits_zh_en')
+    const normalized = normalizeTtsEngine(engine) || 'vits_zh';
+    const sherpa = (normalized === 'vits_zh' || normalized === 'vits_melo_zh_en')
         ? getSherpaTtsConfig(normalized)
-        : (ttsConfigCache.sherpa_onnx_vits || {});
+        : (ttsConfigCache.vits_zh || {});
     const edge = ttsConfigCache.edgetts || {};
 
     const speaker = document.getElementById('tts-speaker');
@@ -1255,14 +1255,14 @@ function applyTtsFormValues(engine) {
 }
 
 function applyTtsVoiceOptions(engine) {
-    const normalized = normalizeTtsEngine(engine) || 'sherpa_onnx_vits';
+    const normalized = normalizeTtsEngine(engine) || 'vits_zh';
     const speakerSelect = document.getElementById('tts-speaker');
     if (!speakerSelect) {
         return;
     }
     const options = Array.isArray(ttsVoiceOptionsCache[normalized]) && ttsVoiceOptionsCache[normalized].length
         ? ttsVoiceOptionsCache[normalized]
-        : (Array.isArray(ttsVoiceOptionsCache.sherpa_onnx_vits) ? ttsVoiceOptionsCache.sherpa_onnx_vits : []);
+        : (Array.isArray(ttsVoiceOptionsCache.vits_zh) ? ttsVoiceOptionsCache.vits_zh : []);
     speakerSelect.innerHTML = options.map((item) => (
         `<option value="${item.id}">${item.label}</option>`
     )).join('');
@@ -1272,11 +1272,11 @@ function applyTtsVoiceOptions(engine) {
 }
 
 function syncTtsPanels(engine) {
-    const normalized = normalizeTtsEngine(engine) || 'sherpa_onnx_vits';
+    const normalized = normalizeTtsEngine(engine) || 'vits_zh';
     const sherpaPanel = document.getElementById('tts-sherpa-panel');
     const edgePanel = document.getElementById('tts-edge-panel');
     if (sherpaPanel) {
-        sherpaPanel.style.display = (normalized === 'sherpa_onnx_vits' || normalized === 'sherpa_onnx_vits_zh_en') ? '' : 'none';
+        sherpaPanel.style.display = (normalized === 'vits_zh' || normalized === 'vits_melo_zh_en') ? '' : 'none';
     }
     if (edgePanel) {
         edgePanel.style.display = normalized === 'edgetts' ? '' : 'none';
@@ -1284,10 +1284,10 @@ function syncTtsPanels(engine) {
 }
 
 function getTtsEngineDescription(engine) {
-    const normalized = normalizeTtsEngine(engine) || 'sherpa_onnx_vits';
+    const normalized = normalizeTtsEngine(engine) || 'vits_zh';
     const descriptions = {
-        sherpa_onnx_vits: 'Local Chinese TTS, model k2-fsa/sherpa-onnx-vits-zh-ll.',
-        sherpa_onnx_vits_zh_en: 'Local zh/en TTS, model vits-melo-tts-zh_en.',
+        vits_zh: 'Local Chinese TTS, model k2-fsa/sherpa-onnx-vits-zh-ll.',
+        vits_melo_zh_en: 'Local zh/en TTS, model vits-melo-tts-zh_en.',
         edgetts: 'Online TTS for English words and mixed zh/en speech.'
     };
     return descriptions[normalized] || normalized;
@@ -1323,8 +1323,8 @@ async function loadSettings() {
     }
 
     const data = result.data || {};
-    const tts = (((data.tts || {}).sherpa_onnx_vits) || {});
-    const ttsZhEn = (((data.tts || {}).sherpa_onnx_vits_zh_en) || {});
+    const tts = (((data.tts || {}).vits_zh) || {});
+    const ttsZhEn = (((data.tts || {}).vits_melo_zh_en) || {});
     const edge = (((data.tts || {}).edgetts) || {});
     const asr = (((data.asr || {}).paraformer) || {});
     const llmPayload = data.llm || {};
@@ -1335,8 +1335,8 @@ async function loadSettings() {
     const engineOptions = Array.isArray(meta.tts_engine_options) && meta.tts_engine_options.length
         ? meta.tts_engine_options
         : [
-            { id: 'sherpa_onnx_vits', label: 'Sherpa-ONNX', desc: '本地中文 TTS。' },
-            { id: 'sherpa_onnx_vits_zh_en', label: 'Sherpa-ONNX 中英', desc: '本地中英 TTS。' },
+            { id: 'vits_zh', label: 'vits-zh', desc: '本地中文 TTS。' },
+            { id: 'vits_melo_zh_en', label: 'vits-melo-zh_en', desc: '本地中英 TTS。' },
             { id: 'edgetts', label: 'EdgeTTS', desc: '在线 TTS。' }
         ];
     const llmModeOptions = Array.isArray(meta.llm_mode_options) && meta.llm_mode_options.length
@@ -1348,16 +1348,16 @@ async function loadSettings() {
         ];
     const avatarOptions = Array.isArray(meta.avatar_options) ? meta.avatar_options : [];
     const modelDescriptions = meta.model_descriptions || {};
-    const currentEngine = normalizeTtsEngine(providers.tts || 'sherpa_onnx_vits') || 'sherpa_onnx_vits';
+    const currentEngine = normalizeTtsEngine(providers.tts || 'vits_zh') || 'vits_zh';
     const currentLlmMode = normalizeLlmMode(providers.llm || meta.current_llm_mode || 'openai_chat') || 'openai_chat';
     ttsConfigCache = {
-        sherpa_onnx_vits: tts,
-        sherpa_onnx_vits_zh_en: ttsZhEn,
+        vits_zh: tts,
+        vits_melo_zh_en: ttsZhEn,
         edgetts: edge
     };
     ttsVoiceOptionsCache = {
-        sherpa_onnx_vits: Array.isArray(voiceOptionsByEngine.sherpa_onnx_vits) ? voiceOptionsByEngine.sherpa_onnx_vits : voiceOptions,
-        sherpa_onnx_vits_zh_en: Array.isArray(voiceOptionsByEngine.sherpa_onnx_vits_zh_en) ? voiceOptionsByEngine.sherpa_onnx_vits_zh_en : [],
+        vits_zh: Array.isArray(voiceOptionsByEngine.vits_zh) ? voiceOptionsByEngine.vits_zh : voiceOptions,
+        vits_melo_zh_en: Array.isArray(voiceOptionsByEngine.vits_melo_zh_en) ? voiceOptionsByEngine.vits_melo_zh_en : [],
         edgetts: Array.isArray(voiceOptionsByEngine.edgetts) ? voiceOptionsByEngine.edgetts : []
     };
     llmModeOptionsCache = llmModeOptions;
@@ -1411,7 +1411,7 @@ async function loadSettings() {
     updateSettingsSummary(currentEngine, currentLlmMode, currentAvatarIdCache);
 }
 async function saveSettings() {
-    const selectedEngine = normalizeTtsEngine(document.getElementById('tts-engine').value) || 'sherpa_onnx_vits';
+    const selectedEngine = normalizeTtsEngine(document.getElementById('tts-engine').value) || 'vits_zh';
     const selectedLlmMode = normalizeLlmMode(document.getElementById('llm-provider').value) || 'openai_chat';
     const selectedAvatarId = getSelectedAvatarId();
     const avatarSilenceGateByAvatar = {};
@@ -1457,7 +1457,7 @@ async function saveSettings() {
         }
     };
 
-    if (selectedEngine === 'sherpa_onnx_vits' || selectedEngine === 'sherpa_onnx_vits_zh_en') {
+    if (selectedEngine === 'vits_zh' || selectedEngine === 'vits_melo_zh_en') {
         payload.tts[selectedEngine] = {
             speaker_id: parseInt(document.getElementById('tts-speaker').value, 10),
             speed: parseFloat(document.getElementById('tts-speed').value),
@@ -1472,8 +1472,8 @@ async function saveSettings() {
     if (result.code === 0 && result.data) {
         const savedData = result.data || {};
         ttsConfigCache = {
-            sherpa_onnx_vits: (((savedData.tts || {}).sherpa_onnx_vits) || {}),
-            sherpa_onnx_vits_zh_en: (((savedData.tts || {}).sherpa_onnx_vits_zh_en) || {}),
+            vits_zh: (((savedData.tts || {}).vits_zh) || {}),
+            vits_melo_zh_en: (((savedData.tts || {}).vits_melo_zh_en) || {}),
             edgetts: (((savedData.tts || {}).edgetts) || {})
         };
         llmConfigCache = {

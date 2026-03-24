@@ -1,6 +1,6 @@
-providers:
+﻿providers:
   asr: paraformer
-  tts: sherpa_onnx_vits
+  tts: vits_zh
   avatar: wav2lip
   llm: lm_studio_api
 
@@ -15,9 +15,15 @@ asr:
     batch_size_s: 300
     hotwords: ""
     phonetic_replacements: ""
+    segment_by_silence: true
+    segment_min_silence_ms: 650
+    segment_min_speech_ms: 240
+    segment_padding_ms: 120
+    segment_max_duration_s: 18.0
+    segment_split_overlap_ms: 150
 
 tts:
-  sherpa_onnx_vits:
+  vits_zh:
     model_dir: models/tts/sherpa-onnx-vits-zh-ll
     provider: cpu
     num_threads: 4
@@ -27,7 +33,7 @@ tts:
       - phone.fst
       - date.fst
       - number.fst
-  sherpa_onnx_vits_zh_en:
+  vits_melo_zh_en:
     model_dir: models/tts/vits-melo-tts-zh_en
     provider: cpu
     num_threads: 2
@@ -61,8 +67,6 @@ llm:
     timeout_s: 60
     system_prompt_zh: 你是一个离线数字人助手。请在需要时使用中文简洁准确地回答。最多三句话，不要使用表情。
     system_prompt_en: You are an offline digital human assistant. Reply concisely and accurately.
-    web_search_enabled: false
-    web_search_max_keyword: 2
   chat_completions_api:
     base_url: ""
     api_key: ""
@@ -70,7 +74,6 @@ llm:
     timeout_s: 60
     system_prompt_zh: 你是一个离线数字人助手。请在需要时使用中文简洁准确地回答。最多三句话，不要使用表情。
     system_prompt_en: You are an offline digital human assistant. Reply concisely and accurately.
-    stream: false
   lm_studio_api:
     base_url: http://127.0.0.1:1234/api/v1/chat
     api_key: ""
@@ -78,4 +81,5 @@ llm:
     timeout_s: 60
     system_prompt_zh: 你是一个离线数字人助手。请在需要时使用中文简洁准确地回答。最多三句话，不要使用表情。
     system_prompt_en: You are an offline digital human assistant. Reply concisely and accurately.
-    stream: false
+
+

@@ -88,7 +88,7 @@ class BaseReal:
         self.__loadcustom()
 
     def build_tts(self):
-        if self.opt.tts in {"sherpa_onnx_vits", "sherpa-onnx-vits", "sherpa_onnx_vits_zh_en", "vits_melo_tts_zh_en"}:
+        if self.opt.tts in {"vits_zh", "sherpa_onnx_vits", "sherpa-onnx-vits", "vits_melo_zh_en", "sherpa_onnx_vits_zh_en", "vits_melo_tts_zh_en"}:
             return SherpaOnnxVitsTTS(self.opt, self)
         if self.opt.tts == "edgetts":
             return EdgeTTS(self.opt, self)

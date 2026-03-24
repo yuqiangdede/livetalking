@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import re
 import threading
 import time
+import unicodedata
 from pathlib import Path
 
 import numpy as np
@@ -24,6 +26,45 @@ def _repair_mojibake(text: str) -> str:
         return text.encode("latin-1").decode("utf-8")
     except (UnicodeEncodeError, UnicodeDecodeError):
         return text
+
+
+_TTS_GARBAGE_CHARS = {
+    "锛",
+    "銆",
+    "閿",
+    "鍥",
+    "璇",
+    "娴",
+    "浣",
+    "闂",
+    "鎼",
+    "鎯",
+    "闊",
+    "鈧",
+    "鈩",
+}
+
+
+def _sanitize_tts_text(text: str) -> str:
+    text = _repair_mojibake((text or "").strip())
+    if not text:
+        return ""
+
+    text = unicodedata.normalize("NFKC", text).replace("\uFFFD", " ")
+    cleaned: list[str] = []
+    for char in text:
+        if char in _TTS_GARBAGE_CHARS:
+            continue
+        if char.isspace():
+            cleaned.append(" ")
+            continue
+        if char.isalnum():
+            cleaned.append(char)
+            continue
+        if "\u4e00" <= char <= "\u9fff" or "\u3400" <= char <= "\u4dbf":
+            cleaned.append(char)
+            continue
+    return re.sub(r"\s+", " ", "".join(cleaned)).strip()
 
 
 class SherpaOnnxVitsTTS(BaseTTS):
@@ -99,6 +140,15 @@ class SherpaOnnxVitsTTS(BaseTTS):
                 self._tts = self.__class__._shared_tts
         return self._tts
 
+    def warmup(self) -> None:
+        self._get_tts()
+
+    def put_msg_txt(self, msg: str, datainfo: dict | None = None) -> None:
+        cleaned = _sanitize_tts_text(msg)
+        if not cleaned:
+            return
+        super().put_msg_txt(cleaned, datainfo)
+
     def _synthesize(self, text: str) -> tuple[np.ndarray, int]:
         tts = self._get_tts()
         start = time.perf_counter()
@@ -128,7 +178,7 @@ class SherpaOnnxVitsTTS(BaseTTS):
 
     def txt_to_audio(self, msg: tuple[str, dict]):
         text, textevent = msg
-        text = _repair_mojibake((text or "").strip())
+        text = _sanitize_tts_text(text)
         if not text:
             return
 
