@@ -17,9 +17,10 @@ data/*
 !data/.gitkeep
 !data/README.md
 
-models/*
-!models/.gitkeep
-!models/README.md
+models/**/._____temp/*
+models/**/._____temp/
+models/**/__pycache__/*
+models/**/__pycache__/
 
 configs/app.local.yaml
 *.log
