@@ -1,6 +1,12 @@
 var pc = null;
 var offerRequestId = 0;
 var offerAbortController = null;
+var reconnectTimer = null;
+var reconnectDelayMs = 1200;
+var reconnectMaxDelayMs = 10000;
+var connectionEpoch = 0;
+var manualDisconnect = false;
+var startInProgress = false;
 
 function cancelPendingOffer() {
     offerRequestId += 1;
@@ -8,6 +14,32 @@ function cancelPendingOffer() {
         offerAbortController.abort();
         offerAbortController = null;
     }
+}
+
+function clearReconnectTimer() {
+    if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+    }
+}
+
+function resetReconnectBackoff() {
+    reconnectDelayMs = 1200;
+    clearReconnectTimer();
+}
+
+function scheduleReconnect(currentEpoch) {
+    if (manualDisconnect || reconnectTimer || startInProgress) {
+        return;
+    }
+    reconnectTimer = setTimeout(function () {
+        reconnectTimer = null;
+        if (manualDisconnect || currentEpoch !== connectionEpoch) {
+            return;
+        }
+        start();
+    }, reconnectDelayMs);
+    reconnectDelayMs = Math.min(reconnectDelayMs * 2, reconnectMaxDelayMs);
 }
 
 function syncSilenceGateState() {
@@ -40,6 +72,15 @@ function closePeerConnection() {
     setTimeout(function () {
         currentPc.close();
     }, 200);
+}
+
+function hasActivePeerConnection() {
+    if (!pc) {
+        return false;
+    }
+    return pc.connectionState === 'new'
+        || pc.connectionState === 'connecting'
+        || pc.connectionState === 'connected';
 }
 
 function setWebRTCControls(startVisible, stopVisible) {
@@ -124,10 +165,16 @@ function negotiate() {
             });
             syncSilenceGateState().catch(function () {});
             return pc.setRemoteDescription(answer);
+        }).then(function () {
+            if (requestId !== offerRequestId) {
+                return;
+            }
+            startInProgress = false;
         }).catch(function (e) {
             if (requestId !== offerRequestId || (e && e.name === 'AbortError')) {
                 return;
             }
+            startInProgress = false;
             setSessionId(0);
             emitLiveTalkingEvent('livetalking:connectionstate', {
                 state: 'error',
@@ -138,9 +185,16 @@ function negotiate() {
 }
 
 function start() {
+    if (startInProgress || hasActivePeerConnection()) {
+        return;
+    }
+    startInProgress = true;
     cancelPendingOffer();
+    manualDisconnect = false;
+    resetReconnectBackoff();
     closePeerConnection();
     setSessionId(0);
+    var currentEpoch = ++connectionEpoch;
 
     var config = {
         sdpSemantics: 'unified-plan'
@@ -167,13 +221,28 @@ function start() {
     });
 
     pc.addEventListener('connectionstatechange', function () {
-        logState('pc.connectionState', pc.connectionState);
-        emitLiveTalkingEvent('livetalking:connectionstate', { state: pc.connectionState });
-        if (pc.connectionState === 'failed' || pc.connectionState === 'closed' || pc.connectionState === 'disconnected') {
+        if (currentEpoch !== connectionEpoch) {
+            return;
+        }
+        var state = pc.connectionState;
+        logState('pc.connectionState', state);
+        emitLiveTalkingEvent('livetalking:connectionstate', { state: state });
+        if (state === 'connected') {
+            startInProgress = false;
+            resetReconnectBackoff();
+            return;
+        }
+        if (state === 'failed' || state === 'closed' || state === 'disconnected') {
+            startInProgress = false;
             setSessionId(0);
+            scheduleReconnect(currentEpoch);
+            return;
         }
     });
     pc.addEventListener('iceconnectionstatechange', function () {
+        if (currentEpoch !== connectionEpoch) {
+            return;
+        }
         logState('pc.iceConnectionState', pc.iceConnectionState);
         emitLiveTalkingEvent('livetalking:connectionstate', {
             state: 'ice-' + pc.iceConnectionState,
@@ -181,6 +250,9 @@ function start() {
         });
     });
     pc.addEventListener('icegatheringstatechange', function () {
+        if (currentEpoch !== connectionEpoch) {
+            return;
+        }
         logState('pc.iceGatheringState', pc.iceGatheringState);
     });
 
@@ -189,6 +261,10 @@ function start() {
 }
 
 function stop() {
+    manualDisconnect = true;
+    startInProgress = false;
+    clearReconnectTimer();
+    reconnectDelayMs = 1200;
     cancelPendingOffer();
     setWebRTCControls(true, false);
     setSessionId(0);
@@ -197,6 +273,9 @@ function stop() {
 }
 
 window.addEventListener('pagehide', function () {
+    manualDisconnect = true;
+    startInProgress = false;
+    clearReconnectTimer();
     cancelPendingOffer();
     closePeerConnection();
 });

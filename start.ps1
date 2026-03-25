@@ -47,6 +47,20 @@ function Ensure-RuntimeDirectories {
     }
 }
 
+function Test-AppArgPresent {
+    param([string]$Name)
+
+    foreach ($arg in $AppArgs) {
+        if ($arg -eq $Name) {
+            return $true
+        }
+        if ($arg.StartsWith("$Name=")) {
+            return $true
+        }
+    }
+    return $false
+}
+
 Ensure-RuntimeDirectories
 Prepend-PathEntry -Path $PortablePythonDir
 Prepend-PathEntry -Path $PortablePythonScripts
@@ -59,6 +73,10 @@ if (Test-Leaf $PortablePython) {
     $runtimePython = $VenvPython
 } else {
     throw "Python runtime not found. Expected python\python.exe or .venv\Scripts\python.exe."
+}
+
+if (-not (Test-AppArgPresent "--batch_size")) {
+    $AppArgs = @("--batch_size", "4") + @($AppArgs)
 }
 
 & $runtimePython $AppEntry @AppArgs

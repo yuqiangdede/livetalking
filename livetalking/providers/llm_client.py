@@ -349,10 +349,14 @@ def llm_response(
     nerfreal: BaseReal,
     continuous_dialogue: bool = False,
     dialog_start_ts: float | None = None,
+    response_token: int | None = None,
 ):
     start = time.perf_counter()
     dialog_start_ts = start if dialog_start_ts is None else dialog_start_ts
     dialog_id = str(uuid.uuid4())
+    if hasattr(nerfreal, "is_response_active") and not nerfreal.is_response_active(response_token):
+        logger.info("llm response aborted before request because session is inactive or superseded")
+        return
     if _llm_config["mode"] == "chat_completions_api":
         url = _join_endpoint(_llm_config["base_url"], "/chat/completions")
     elif _llm_config["mode"] == "lm_studio_api":
@@ -392,6 +396,10 @@ def llm_response(
         )
     else:
         for raw_line in response.iter_lines(decode_unicode=False):
+            if hasattr(nerfreal, "is_response_active") and not nerfreal.is_response_active(response_token):
+                logger.info("llm response dropped while streaming because session is inactive or superseded")
+                response.close()
+                return
             if not raw_line:
                 continue
             if isinstance(raw_line, bytes):
@@ -432,6 +440,9 @@ def llm_response(
 
     elapsed = time.perf_counter() - start
     logger.info("llm Time to last chunk: %ss", elapsed)
+    if hasattr(nerfreal, "is_response_active") and not nerfreal.is_response_active(response_token):
+        logger.info("llm response dropped after completion because session is inactive or superseded")
+        return
     if result.strip():
         if hasattr(nerfreal, "append_dialog"):
             meta = {"llm_elapsed": elapsed, "dialog_id": dialog_id}

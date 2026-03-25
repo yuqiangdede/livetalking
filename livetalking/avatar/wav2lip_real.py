@@ -46,7 +46,7 @@ from tqdm import tqdm
 from ..utils.app_logger import logger
 
 device = "cuda" if torch.cuda.is_available() else ("mps" if (hasattr(torch.backends, "mps") and torch.backends.mps.is_available()) else "cpu")
-model_dtype = torch.float16 if device == "cuda" else torch.float32
+model_dtype = torch.float32
 print('Using {} for inference.'.format(device))
 
 
@@ -104,11 +104,7 @@ def load_model(path):
 	model.load_state_dict(new_s)
 
 	model = model.to(device)
-	if model_dtype == torch.float16:
-		model = model.half()
-		logger.info("Wav2Lip inference dtype: float16")
-	else:
-		logger.info("Wav2Lip inference dtype: float32")
+	logger.info("Wav2Lip inference dtype: float32")
 	first_param = next(model.parameters(), None)
 	if first_param is not None:
 		logger.info("Wav2Lip model device: %s", first_param.device)
@@ -317,9 +313,12 @@ def inference(quit_event,batch_size,real,audio_feat_queue,audio_out_queue,res_fr
             pred = pred.float().cpu().numpy().transpose(0, 2, 3, 1) * 255.
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug(
-                    "Wav2Lip output batch shape=%s dtype=%s",
+                    "Wav2Lip output batch shape=%s dtype=%s min=%.3f max=%.3f mean=%.3f",
                     pred.shape,
                     pred.dtype,
+                    float(pred.min()),
+                    float(pred.max()),
+                    float(pred.mean()),
                 )
 
             counttime += (time.perf_counter() - t)

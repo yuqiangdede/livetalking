@@ -382,12 +382,18 @@ class ParaformerProvider:
         if not self._hotword_lines:
             hotword_path.unlink(missing_ok=True)
             self._hotword_file_path = ""
+            logger.info("ASR hotword file cleared: path=%s", hotword_path)
             return
 
         content = "\n".join(self._hotword_lines) + "\n"
         if not hotword_path.exists() or hotword_path.read_text(encoding="utf-8") != content:
             hotword_path.write_text(content, encoding="utf-8")
         self._hotword_file_path = str(hotword_path)
+        logger.info(
+            "ASR hotword file refreshed: path=%s hotwords=%s",
+            hotword_path,
+            self._hotword_lines,
+        )
 
     def update_asr_rules(self, hotwords: str | None = None, phonetic_replacements: str | None = None) -> None:
         with self._config_lock:

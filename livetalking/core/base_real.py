@@ -72,6 +72,9 @@ class BaseReal:
         self._speech_first_frame_marked = False
         self.dialog_lock = Lock()
         self.dialog_history: list[dict] = []
+        self.session_lock = Lock()
+        self.session_active = True
+        self.response_generation = 0
 
         self.recording = False
         self._record_video_pipe = None
@@ -103,6 +106,35 @@ class BaseReal:
 
     def put_msg_txt(self,msg,datainfo:dict={}):
         self.tts.put_msg_txt(msg,datainfo)
+
+    def begin_response(self) -> int:
+        with self.session_lock:
+            if not self.session_active:
+                return -1
+            self.response_generation += 1
+            return self.response_generation
+
+    def invalidate_pending_responses(self) -> int:
+        with self.session_lock:
+            self.response_generation += 1
+            return self.response_generation
+
+    def deactivate_session(self) -> None:
+        with self.session_lock:
+            already_inactive = not self.session_active
+            self.session_active = False
+            self.response_generation += 1
+        if already_inactive:
+            return
+        self.flush_talk()
+
+    def is_response_active(self, token: int | None = None) -> bool:
+        with self.session_lock:
+            if not self.session_active:
+                return False
+            if token is None:
+                return True
+            return token == self.response_generation
 
     def append_dialog(self, role: str, text: str, source: str = "", meta: dict | None = None, dialog_id: str = "") -> str:
         text = (text or "").strip()

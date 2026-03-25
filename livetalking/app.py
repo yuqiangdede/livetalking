@@ -603,8 +603,46 @@ def get_session_real(sessionid: int) -> BaseReal:
     return nerfreal
 
 
-def resolve_preferred_ice_addresses(request: web.Request) -> list[str]:
+def _extract_offer_udp_host_ipv4_candidates(sdp: str) -> list[str]:
+    candidates: list[str] = []
+    for raw_line in sdp.splitlines():
+        line = raw_line.strip()
+        if not line.startswith("a=candidate:"):
+            continue
+        parts = line.split()
+        if len(parts) < 8:
+            continue
+        transport = parts[2].lower()
+        address = parts[4].strip()
+        candidate_type = parts[7].lower()
+        if transport != "udp" or candidate_type != "host":
+            continue
+        try:
+            ip = ipaddress.ip_address(address)
+        except ValueError:
+            continue
+        if ip.version != 4 or ip.is_link_local:
+            continue
+        if address not in candidates:
+            candidates.append(address)
+    return candidates
+
+
+def resolve_preferred_ice_addresses(request: web.Request, offer_sdp: str = "") -> list[str]:
     host = request.host.split(":")[0].strip().lower()
+
+    if host in {"127.0.0.1", "localhost"}:
+        offer_candidates = _extract_offer_udp_host_ipv4_candidates(offer_sdp)
+        if "127.0.0.1" in offer_candidates:
+            return ["127.0.0.1"]
+        non_loopback_offer_candidates = [addr for addr in offer_candidates if addr != "127.0.0.1"]
+        if non_loopback_offer_candidates:
+            logger.info(
+                "Using localhost remote-offer IPv4 candidate(s) as preferred ICE addresses: %s",
+                non_loopback_offer_candidates,
+            )
+            return non_loopback_offer_candidates
+        return ["127.0.0.1"]
 
     preferred = _get_local_non_loopback_ipv4_addresses()
 
@@ -625,13 +663,54 @@ def resolve_preferred_ice_addresses(request: web.Request) -> list[str]:
 
 def should_force_loopback_mdns(request: web.Request) -> bool:
     host = request.host.split(":")[0].strip().lower()
-    if host not in {"127.0.0.1", "localhost"}:
-        return False
-    return not _get_local_non_loopback_ipv4_addresses()
+    return host in {"127.0.0.1", "localhost"}
 
 
 def rewrite_local_mdns_candidates(sdp: str) -> str:
-    return re.sub(r"(?<=\s)([0-9a-f-]+\.local)(?=\s)", "127.0.0.1", sdp, flags=re.IGNORECASE)
+    line_ending = "\r\n" if "\r\n" in sdp else "\n"
+    rewritten_mdns = re.sub(r"(?<=\s)([0-9a-f-]+\.local)(?=\s)", "127.0.0.1", sdp, flags=re.IGNORECASE)
+
+    rewritten_lines: list[str] = []
+    dropped_candidates = 0
+    kept_loopback_candidates = 0
+
+    for raw_line in rewritten_mdns.splitlines():
+        line = raw_line.strip()
+        if not line:
+            rewritten_lines.append(raw_line)
+            continue
+
+        if line.startswith("c=IN IP4 "):
+            rewritten_lines.append("c=IN IP4 127.0.0.1")
+            continue
+
+        if line.startswith("a=candidate:"):
+            parts = line.split()
+            if len(parts) >= 8:
+                transport = parts[2].lower()
+                address = parts[4].lower()
+                candidate_type = parts[7].lower()
+                if transport == "udp" and candidate_type == "host" and address == "127.0.0.1":
+                    kept_loopback_candidates += 1
+                    rewritten_lines.append(" ".join(parts))
+                    continue
+                dropped_candidates += 1
+                continue
+            rewritten_lines.append(line)
+            continue
+
+        rewritten_lines.append(raw_line)
+
+    if kept_loopback_candidates <= 0:
+        logger.warning(
+            "No loopback UDP host ICE candidate found in localhost offer; keeping rewritten original SDP candidates"
+        )
+        return rewritten_mdns
+
+    if dropped_candidates:
+        logger.info("Filtered %s non-loopback ICE candidate(s) from localhost offer", dropped_candidates)
+
+    return line_ending.join(rewritten_lines) + line_ending
 
 
 def build_nerfreal(sessionid: int) -> BaseReal:
@@ -652,7 +731,7 @@ async def offer(request: web.Request) -> web.Response:
             logger.info("Rewrote localhost mDNS ICE candidates to 127.0.0.1 for local debugging")
         raw_sdp = rewritten_sdp
     remote_offer = RTCSessionDescription(sdp=raw_sdp, type=params["type"])
-    _preferred_ice_addresses = resolve_preferred_ice_addresses(request)
+    _preferred_ice_addresses = resolve_preferred_ice_addresses(request, raw_sdp)
     logger.info("Preferred ICE addresses for %s -> %s", request.host, _preferred_ice_addresses)
     offer_candidates = [
         line.strip()
@@ -674,6 +753,7 @@ async def offer(request: web.Request) -> web.Response:
     async def on_connectionstatechange():
         logger.info("Connection state is %s", pc.connectionState)
         if pc.connectionState in {"failed", "closed"}:
+            nerfreal.deactivate_session()
             await pc.close()
             pcs.discard(pc)
             nerfreals.pop(sessionid, None)
@@ -726,6 +806,7 @@ async def human(request: web.Request) -> web.Response:
         nerfreal = get_session_real(sessionid)
 
         if params.get("interrupt"):
+            nerfreal.invalidate_pending_responses()
             nerfreal.flush_talk()
 
         if not params.get("skip_dialog_log") and hasattr(nerfreal, "append_dialog"):
@@ -741,6 +822,9 @@ async def human(request: web.Request) -> web.Response:
         elif params["type"] == "chat":
             continuous_dialogue = bool(params.get("continuous_dialogue", False))
             dialog_start_ts = time.perf_counter()
+            response_token = nerfreal.begin_response()
+            if response_token < 0:
+                raise InvalidSessionError(f"invalid sessionid: {sessionid}, session already closed")
             asyncio.get_event_loop().run_in_executor(
                 None,
                 safe_llm_response,
@@ -748,6 +832,7 @@ async def human(request: web.Request) -> web.Response:
                 nerfreal,
                 continuous_dialogue,
                 dialog_start_ts,
+                response_token,
             )
 
         return json_response({"code": 0, "msg": "ok"})
@@ -1352,9 +1437,10 @@ def safe_llm_response(
     nerfreal: BaseReal,
     continuous_dialogue: bool = False,
     dialog_start_ts: float | None = None,
+    response_token: int | None = None,
 ) -> None:
     try:
-        llm_response(message, nerfreal, continuous_dialogue, dialog_start_ts)
+        llm_response(message, nerfreal, continuous_dialogue, dialog_start_ts, response_token)
     except Exception:
         logger.exception("llm_response failed")
 
@@ -1492,7 +1578,7 @@ def main() -> None:
     bootstrap_runtime(args)
     logger.info("start http server; port=%s", opt.listenport)
     logger.info("主控台页面: http://127.0.0.1:%s/webrtcapi-asr.html", opt.listenport)
-    run_server(web.AppRunner(create_web_app()))
+    run_server(web.AppRunner(create_web_app(), access_log=None))
 
 
 if __name__ == "__main__":

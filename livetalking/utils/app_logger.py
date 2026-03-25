@@ -20,6 +20,16 @@ LOG_DIR = PROJECT_ROOT / "runtime" / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 _LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+_NOISY_THIRD_PARTY_LOGGERS = {
+    "aioice": logging.INFO,
+    "aiortc": logging.INFO,
+    "av": logging.INFO,
+    "numba": logging.INFO,
+    "numba.core": logging.INFO,
+    "numba.core.byteflow": logging.INFO,
+    "urllib3": logging.INFO,
+    "asyncio": logging.INFO,
+}
 
 
 def _coerce_level(level: str | int | None) -> int:
@@ -55,7 +65,10 @@ def configure_logging(level: str | int | None = None) -> None:
         handler.setFormatter(formatter)
 
     root_logger = logging.getLogger()
-    root_logger.setLevel(resolved_level)
+    root_logger.setLevel(max(resolved_level, logging.INFO))
+
+    for logger_name, logger_level in _NOISY_THIRD_PARTY_LOGGERS.items():
+        logging.getLogger(logger_name).setLevel(logger_level)
 
 
 logger = logging.getLogger(__name__)

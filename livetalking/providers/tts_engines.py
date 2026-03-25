@@ -90,6 +90,8 @@ class EdgeTTS(BaseTTS):
         stream = self._create_bytes_stream(self.input_stream)
         streamlen = stream.shape[0]
         idx = 0
+        queued_chunks = 0
+        queued_samples = 0
         while streamlen >= self.chunk and self.state == State.RUNNING:
             eventpoint = {}
             streamlen -= self.chunk
@@ -100,7 +102,15 @@ class EdgeTTS(BaseTTS):
                 eventpoint = {"status": "end", "text": text}
                 eventpoint.update(**textevent)
             self.parent.put_audio_frame(stream[idx:idx + self.chunk], eventpoint)
+            queued_chunks += 1
+            queued_samples += self.chunk
             idx += self.chunk
+        logger.info(
+            "EdgeTTS audio queued chunks=%s queued_samples=%s text_len=%s",
+            queued_chunks,
+            queued_samples,
+            len(text),
+        )
         self.input_stream.seek(0)
         self.input_stream.truncate()
 

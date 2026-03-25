@@ -1197,6 +1197,36 @@
     </div>
 </div>
 
+<div id="avatar-switch-backdrop" class="modal-backdrop" aria-hidden="true">
+    <div class="modal generation-modal" role="dialog" aria-modal="true" aria-labelledby="avatar-switch-title">
+        <div class="modal-header">
+            <h2 class="modal-title" id="avatar-switch-title">Avatar 切换进度</h2>
+            <button id="close-avatar-switch" class="ghost" type="button">关闭</button>
+        </div>
+        <div class="modal-body">
+            <div class="section-note" id="avatar-switch-summary"></div>
+            <div class="generation-summary" style="margin-top:12px;">
+                <div>
+                    <div class="generation-progress-head">
+                        <span id="avatar-switch-phase">等待开始</span>
+                        <span id="avatar-switch-percent">0%</span>
+                    </div>
+                    <div class="generation-progress-track" style="margin-top:8px;">
+                        <div id="avatar-switch-bar" class="generation-progress-bar"></div>
+                    </div>
+                </div>
+                <div class="section-note" id="avatar-switch-message"></div>
+            </div>
+            <div style="margin-top:12px;">
+                <pre id="avatar-switch-log" class="generation-log"></pre>
+            </div>
+            <div class="modal-actions" style="margin-top:14px;">
+                <button id="dismiss-avatar-switch" type="button" class="ghost">完成</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div id="avatar-material-preview" class="avatar-material-preview" aria-hidden="true">
     <img id="avatar-material-preview-img" alt="素材缩略图"/>
     <div id="avatar-material-preview-caption" class="caption"></div>
@@ -1216,12 +1246,155 @@ let continuousDialogueEnabled = false;
 let avatarGenerationPollTimer = null;
 let avatarGenerationActiveJobId = '';
 let avatarGenerationBusy = false;
+let avatarSwitchProgressTimer = null;
+let avatarSwitchProgressValue = 0;
+let avatarSwitchProgressActive = false;
 let avatarMaterialPreviewHoverTimer = null;
 
 const CONTINUOUS_DIALOGUE_STORAGE_KEY = 'livetalking.continuousDialogueEnabled';
 
 function updateStatus(text) {
     void text;
+}
+
+function getAvatarSwitchModalNodes() {
+    return {
+        backdrop: document.getElementById('avatar-switch-backdrop'),
+        summary: document.getElementById('avatar-switch-summary'),
+        phase: document.getElementById('avatar-switch-phase'),
+        percent: document.getElementById('avatar-switch-percent'),
+        bar: document.getElementById('avatar-switch-bar'),
+        message: document.getElementById('avatar-switch-message'),
+        log: document.getElementById('avatar-switch-log'),
+        closeButton: document.getElementById('close-avatar-switch'),
+        dismissButton: document.getElementById('dismiss-avatar-switch')
+    };
+}
+
+function renderAvatarSwitchProgress(progress, phase, message, logLines) {
+    const nodes = getAvatarSwitchModalNodes();
+    if (!nodes.backdrop || !nodes.phase || !nodes.percent || !nodes.bar || !nodes.message || !nodes.log) {
+        return;
+    }
+
+    const safeProgress = Math.max(0, Math.min(100, Math.round(Number(progress) || 0)));
+    if (nodes.summary) {
+        nodes.summary.textContent = avatarSwitchProgressActive
+            ? '正在切换 Avatar，请等待保存和资源刷新完成。'
+            : 'Avatar 切换已完成。';
+    }
+    nodes.phase.textContent = phase || '处理中';
+    nodes.percent.textContent = `${safeProgress}%`;
+    nodes.bar.style.width = `${safeProgress}%`;
+    nodes.message.textContent = message || (avatarSwitchProgressActive ? '正在切换 Avatar，请稍候。' : '');
+    nodes.log.textContent = Array.isArray(logLines) && logLines.length
+        ? logLines.join('\n')
+        : [
+            '正在保存运行时配置...',
+            '正在重新加载 Avatar 资源...',
+            '正在同步 WebRTC 会话状态...',
+            '等待后端完成切换...'
+        ].join('\n');
+}
+
+function openAvatarSwitchModal(avatarId) {
+    const nodes = getAvatarSwitchModalNodes();
+    if (!nodes.backdrop) {
+        return;
+    }
+
+    avatarSwitchProgressActive = true;
+    avatarSwitchProgressValue = 8;
+    nodes.backdrop.classList.add('open');
+    nodes.backdrop.setAttribute('aria-hidden', 'false');
+    if (nodes.closeButton) {
+        nodes.closeButton.disabled = true;
+    }
+    if (nodes.dismissButton) {
+        nodes.dismissButton.disabled = true;
+    }
+    renderAvatarSwitchProgress(avatarSwitchProgressValue, '准备切换', `正在切换到 Avatar ${avatarId || ''}...`, [
+        `目标 Avatar：${avatarId || '未指定'}`,
+        '保存配置并刷新当前资源',
+        '请等待页面状态更新'
+    ]);
+    if (avatarSwitchProgressTimer) {
+        clearInterval(avatarSwitchProgressTimer);
+    }
+    avatarSwitchProgressTimer = window.setInterval(() => {
+        if (!avatarSwitchProgressActive) {
+            return;
+        }
+        if (avatarSwitchProgressValue < 92) {
+            avatarSwitchProgressValue += avatarSwitchProgressValue < 40 ? 4 : (avatarSwitchProgressValue < 70 ? 2 : 1);
+            renderAvatarSwitchProgress(
+                avatarSwitchProgressValue,
+                avatarSwitchProgressValue < 40 ? '保存配置' : (avatarSwitchProgressValue < 70 ? '刷新 Avatar' : '同步会话'),
+                avatarSwitchProgressValue < 40
+                    ? '后端正在保存配置。'
+                    : (avatarSwitchProgressValue < 70
+                        ? '后端正在重新加载 Avatar 资源。'
+                        : '后端正在同步会话状态。'),
+                [
+                    '100%|████████████████████████████████| 保存配置中',
+                    '100%|████████████████████████████████| 重新加载 Avatar 中',
+                    '100%|████████████████████████████████| 同步会话状态中'
+                ]
+            );
+        }
+    }, 650);
+}
+
+function completeAvatarSwitchModal(success, text) {
+    const nodes = getAvatarSwitchModalNodes();
+    if (!nodes.backdrop) {
+        return;
+    }
+
+    avatarSwitchProgressActive = false;
+    if (avatarSwitchProgressTimer) {
+        clearInterval(avatarSwitchProgressTimer);
+        avatarSwitchProgressTimer = null;
+    }
+    avatarSwitchProgressValue = success ? 100 : Math.min(avatarSwitchProgressValue, 100);
+    renderAvatarSwitchProgress(
+        avatarSwitchProgressValue,
+        success ? '完成' : '失败',
+        text || (success ? 'Avatar 切换完成。' : 'Avatar 切换失败。'),
+        success
+            ? [
+                '100%|████████████████████████████████| Avatar 切换完成',
+                '页面状态已更新'
+            ]
+            : [
+                '切换未完成',
+                '请查看后端日志或重试'
+            ]
+    );
+    if (nodes.closeButton) {
+        nodes.closeButton.disabled = false;
+    }
+    if (nodes.dismissButton) {
+        nodes.dismissButton.disabled = false;
+    }
+}
+
+function closeAvatarSwitchModal(force = false) {
+    const nodes = getAvatarSwitchModalNodes();
+    if (!nodes.backdrop) {
+        return;
+    }
+    if (!force && avatarSwitchProgressActive) {
+        return;
+    }
+    nodes.backdrop.classList.remove('open');
+    nodes.backdrop.setAttribute('aria-hidden', 'true');
+    avatarSwitchProgressActive = false;
+    avatarSwitchProgressValue = 0;
+    if (avatarSwitchProgressTimer) {
+        clearInterval(avatarSwitchProgressTimer);
+        avatarSwitchProgressTimer = null;
+    }
 }
 
 function setConnectionBadge(text) {
@@ -1366,8 +1539,21 @@ async function loadConversationHistory() {
     }
 
     const response = await fetch(`/api/dialog/history?sessionid=${encodeURIComponent(sessionId)}&limit=80`);
-    const result = await response.json();
-    if (result.code !== 0) {
+    let result = null;
+    try {
+        result = await response.json();
+    } catch (error) {
+        updateStatus(`Conversation history parse failed: ${error}`);
+        return;
+    }
+    if (!response.ok || !result || result.code !== 0) {
+        const message = result && result.msg ? String(result.msg) : `HTTP ${response.status}`;
+        if (response.status === 400 && message.indexOf('invalid sessionid') >= 0) {
+            setSessionId(0);
+            updateStatus('会话已失效，正在等待 WebRTC 重连。');
+            return;
+        }
+        updateStatus(`Conversation history load failed: ${message}`);
         return;
     }
     renderConversation(result.data || []);
@@ -1849,10 +2035,11 @@ async function confirmAvatarGenerationSelection() {
     if (!job || String(job.status || '') !== 'success') {
         return;
     }
-    currentAvatarIdCache = String(job.avatar_id || currentAvatarIdCache || '');
-    renderAvatarTable();
     try {
-        await saveSettings();
+        await saveSettings({
+            avatarIdOverride: job.avatar_id,
+            showAvatarSwitchProgress: true
+        });
         updateStatus(`已切换到素材 ${currentAvatarIdCache}。`);
         closeAvatarGenerationModal(true);
     } catch (error) {
@@ -2301,10 +2488,10 @@ async function loadSettings() {
     }
     updateSettingsSummary(currentEngine, currentLlmMode, currentAvatarIdCache);
 }
-async function saveSettings() {
+async function saveSettings(options = {}) {
     const selectedEngine = normalizeTtsEngine(document.getElementById('tts-engine').value) || 'vits_zh';
     const selectedLlmMode = normalizeLlmMode(document.getElementById('llm-provider').value) || 'openai_chat';
-    const selectedAvatarId = getSelectedAvatarId();
+    const selectedAvatarId = String(options.avatarIdOverride || getSelectedAvatarId() || '').trim();
     const avatarSilenceGateByAvatar = {};
     (Array.isArray(avatarOptionsCache) ? avatarOptionsCache : []).forEach((item) => {
         if (!item || !item.id) {
@@ -2360,38 +2547,53 @@ async function saveSettings() {
         };
     }
 
-    updateStatus('Saving settings...');
-    const result = await postJson('/api/runtime/config', payload);
-    updateStatus(result.code === 0 ? 'Settings saved.' : `Save failed: ${result.msg}`);
-    if (result.code === 0 && result.data) {
-        const savedData = result.data || {};
-        ttsConfigCache = {
-            vits_zh: (((savedData.tts || {}).vits_zh) || {}),
-            vits_melo_zh_en: (((savedData.tts || {}).vits_melo_zh_en) || {}),
-            edgetts: (((savedData.tts || {}).edgetts) || {})
-        };
-        llmConfigCache = {
-            openai_chat: (((savedData.llm || {}).openai_chat) || llmConfigCache.openai_chat || {}),
-            chat_completions_api: (((savedData.llm || {}).chat_completions_api) || llmConfigCache.chat_completions_api || {}),
-            lm_studio_api: (((savedData.llm || {}).lm_studio_api) || llmConfigCache.lm_studio_api || {})
-        };
-        const savedMeta = savedData.meta || {};
-        currentAvatarIdCache = String(savedMeta.current_avatar_id || selectedAvatarId || currentAvatarIdCache || '');
-        const savedAvatarOptions = Array.isArray(savedMeta.avatar_options) ? savedMeta.avatar_options : [];
-        avatarSilenceGateCache = {};
-        savedAvatarOptions.forEach((item) => {
-            if (item && item.id) {
-                avatarSilenceGateCache[item.id] = Boolean(item.silence_gate_enabled);
-            }
-        });
-        runtimeConfigCache = {
-            log_level: normalizeLogLevel((savedData.runtime || {}).log_level || document.getElementById('runtime-log-level').value)
-        };
+    const avatarChanged = selectedAvatarId && selectedAvatarId !== currentAvatarIdCache;
+    if (avatarChanged && options.showAvatarSwitchProgress !== false) {
+        openAvatarSwitchModal(selectedAvatarId);
     }
-    renderAvatarTable();
-    renderAvatarMaterialsTable();
-    syncAvatarMaterialName(true);
-    closeSettingsModal();
+
+    updateStatus('Saving settings...');
+    try {
+        const result = await postJson('/api/runtime/config', payload);
+        if (avatarChanged && options.showAvatarSwitchProgress !== false) {
+            completeAvatarSwitchModal(true, `Avatar ${selectedAvatarId} 切换完成。`);
+        }
+        updateStatus(result.code === 0 ? 'Settings saved.' : `Save failed: ${result.msg}`);
+        if (result.code === 0 && result.data) {
+            const savedData = result.data || {};
+            ttsConfigCache = {
+                vits_zh: (((savedData.tts || {}).vits_zh) || {}),
+                vits_melo_zh_en: (((savedData.tts || {}).vits_melo_zh_en) || {}),
+                edgetts: (((savedData.tts || {}).edgetts) || {})
+            };
+            llmConfigCache = {
+                openai_chat: (((savedData.llm || {}).openai_chat) || llmConfigCache.openai_chat || {}),
+                chat_completions_api: (((savedData.llm || {}).chat_completions_api) || llmConfigCache.chat_completions_api || {}),
+                lm_studio_api: (((savedData.llm || {}).lm_studio_api) || llmConfigCache.lm_studio_api || {})
+            };
+            const savedMeta = savedData.meta || {};
+            currentAvatarIdCache = String(savedMeta.current_avatar_id || selectedAvatarId || currentAvatarIdCache || '');
+            const savedAvatarOptions = Array.isArray(savedMeta.avatar_options) ? savedMeta.avatar_options : [];
+            avatarSilenceGateCache = {};
+            savedAvatarOptions.forEach((item) => {
+                if (item && item.id) {
+                    avatarSilenceGateCache[item.id] = Boolean(item.silence_gate_enabled);
+                }
+            });
+            runtimeConfigCache = {
+                log_level: normalizeLogLevel((savedData.runtime || {}).log_level || document.getElementById('runtime-log-level').value)
+            };
+        }
+        renderAvatarTable();
+        renderAvatarMaterialsTable();
+        syncAvatarMaterialName(true);
+        closeSettingsModal();
+    } catch (error) {
+        if (avatarChanged && options.showAvatarSwitchProgress !== false) {
+            completeAvatarSwitchModal(false, `Avatar ${selectedAvatarId} 切换失败：${error}`);
+        }
+        throw error;
+    }
 }
 async function sendChatText(text) {
     const sessionId = ensureSession();
@@ -2608,6 +2810,18 @@ if (confirmAvatarGenerationButton) {
         confirmAvatarGenerationSelection().catch((error) => {
             updateStatus(`切换素材失败：${error}`);
         });
+    });
+}
+const closeAvatarSwitchButton = document.getElementById('close-avatar-switch');
+if (closeAvatarSwitchButton) {
+    closeAvatarSwitchButton.addEventListener('click', () => {
+        closeAvatarSwitchModal();
+    });
+}
+const dismissAvatarSwitchButton = document.getElementById('dismiss-avatar-switch');
+if (dismissAvatarSwitchButton) {
+    dismissAvatarSwitchButton.addEventListener('click', () => {
+        closeAvatarSwitchModal(true);
     });
 }
     const ttsEngineSelect = document.getElementById('tts-engine');

@@ -204,6 +204,8 @@ class SherpaOnnxVitsTTS(BaseTTS):
 
         streamlen = stream.shape[0]
         idx = 0
+        queued_chunks = 0
+        queued_samples = 0
         while streamlen >= self.chunk and self.state == State.RUNNING:
             eventpoint = {}
             streamlen -= self.chunk
@@ -214,14 +216,18 @@ class SherpaOnnxVitsTTS(BaseTTS):
                 eventpoint = {"status": "end", "text": text}
                 eventpoint.update(**textevent)
             self.parent.put_audio_frame(stream[idx:idx + self.chunk], eventpoint)
+            queued_chunks += 1
+            queued_samples += self.chunk
             idx += self.chunk
 
         logger.info(
-            "Sherpa TTS total elapsed %.3fs, audio_duration=%.3fs, text_len=%s, llm_elapsed=%s",
+            "Sherpa TTS total elapsed %.3fs, audio_duration=%.3fs, text_len=%s, llm_elapsed=%s, queued_chunks=%s, queued_samples=%s",
             total_elapsed,
             float(len(stream)) / float(self.sample_rate),
             len(text),
             textevent.get("llm_elapsed"),
+            queued_chunks,
+            queued_samples,
         )
 
         dialog_id = str(textevent.get("dialog_id", ""))
