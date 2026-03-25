@@ -76,7 +76,7 @@ py -3.10 -m venv .venv
 产物：
 
 - `dist/LiveTalking-portable-win64-nvidia-cu128/`
-- `dist/LiveTalking-portable-win64-nvidia-cu128.zip`
+- `dist/LiveTalking-portable-win64-nvidia-cu128.zip`（仅在显式开启压缩时生成）
 
 详细说明见 [docs/PORTABLE_PACKAGE.md](docs/PORTABLE_PACKAGE.md)。
 

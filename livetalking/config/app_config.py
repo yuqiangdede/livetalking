@@ -167,6 +167,7 @@ class ProvidersConfig:
 @dataclass
 class RuntimeConfig:
     temp_dir: str = "runtime/tmp"
+    log_level: str = "INFO"
 
 
 @dataclass

@@ -3,7 +3,7 @@ param(
     [string]$StageDir = "",
     [string]$ZipPath = "",
     [string]$LogPath = "",
-    [switch]$SkipZip
+    [switch]$SkipZip = $true
 )
 
 $ErrorActionPreference = "Stop"
@@ -11,7 +11,7 @@ $ProjectRoot = (Resolve-Path $ProjectRoot).Path
 $DistRoot = Join-Path $ProjectRoot "dist"
 $PackageName = "LiveTalking-portable-win64-nvidia-cu128"
 $script:StepIndex = 0
-$script:StepCount = if ($SkipZip) { 5 } else { 6 }
+$script:StepCount = if ($SkipZip) { 6 } else { 7 }
 
 if ([string]::IsNullOrWhiteSpace($StageDir)) {
     $StageDir = Join-Path $DistRoot $PackageName
@@ -68,7 +68,25 @@ function Copy-DirectoryContent {
     }
 
     Ensure-Directory -Path $Target
-    Copy-Item -Path (Join-Path $Source "*") -Destination $Target -Recurse -Force
+    $arguments = @(
+        $Source,
+        $Target,
+        "/E",
+        "/R:1",
+        "/W:1",
+        "/NFL",
+        "/NDL",
+        "/NJH",
+        "/NJS",
+        "/NP",
+        "/XD",
+        "__pycache__"
+    )
+    & robocopy @arguments | Out-Null
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -ge 8) {
+        throw "robocopy failed: source=$Source target=$Target exit_code=$exitCode"
+    }
 }
 
 function Copy-FileIfExists {
@@ -82,7 +100,10 @@ function Copy-FileIfExists {
     }
 
     Ensure-Directory -Path (Split-Path $Target -Parent)
-    Copy-Item -Path $Source -Destination $Target -Force
+    Copy-Item -LiteralPath $Source -Destination $Target -Force -ErrorAction Stop
+    if (-not (Test-Path -Path $Target -PathType Leaf)) {
+        throw "Portable package build failed: copied file missing at $Target"
+    }
 }
 
 function Remove-JunkArtifacts {
@@ -389,7 +410,7 @@ if (-not $SkipZip) {
 
 Write-BuildLog -Message "Portable package staged at: $StageDir"
 if ($SkipZip) {
-    Write-BuildLog -Message "Portable zip skipped by -SkipZip."
+    Write-BuildLog -Message "Portable zip skipped."
 } else {
     Write-BuildLog -Message "Portable zip created at: $ZipPath"
 }

@@ -5,6 +5,7 @@ providers:
   llm: lm_studio_api
 runtime:
   temp_dir: runtime/tmp
+  log_level: INFO
 asr:
   paraformer:
     model_dir: models/asr/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch

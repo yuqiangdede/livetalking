@@ -16,6 +16,7 @@
 ###############################################################################
 
 import math
+import logging
 import torch
 import numpy as np
 
@@ -130,6 +131,16 @@ def load_avatar(avatar_id, avatar_root="./data/avatars"):
     face_list_cycle = read_imgs(input_face_list)
     silent_frame = _load_silent_frame(avatar_path, frame_list_cycle)
 
+    logger.info(
+        "Avatar loaded: avatar_id=%s path=%s full=%s face=%s coords=%s",
+        avatar_id,
+        avatar_path,
+        len(frame_list_cycle),
+        len(face_list_cycle),
+        len(coord_list_cycle),
+    )
+    _log_avatar_diagnostics(avatar_path, frame_list_cycle, face_list_cycle, coord_list_cycle, silent_frame)
+
     return frame_list_cycle,face_list_cycle,coord_list_cycle,silent_frame
 
 def _resolve_silent_frame_path(avatar_path: str) -> str | None:
@@ -165,6 +176,36 @@ def _load_silent_frame(avatar_path: str, frame_list_cycle):
     if frame_list_cycle:
         return copy.deepcopy(frame_list_cycle[0])
     raise ValueError("Avatar has no frames to use as a silence fallback.")
+
+
+def _log_avatar_diagnostics(avatar_path: str, frame_list_cycle, face_list_cycle, coord_list_cycle, silent_frame) -> None:
+    if not logger.isEnabledFor(logging.DEBUG):
+        return
+
+    first_full = frame_list_cycle[0].shape if frame_list_cycle else None
+    first_face = face_list_cycle[0].shape if face_list_cycle else None
+    first_bbox = coord_list_cycle[0] if coord_list_cycle else None
+    silent_shape = silent_frame.shape if silent_frame is not None else None
+    logger.debug(
+        "Avatar diagnostics path=%s full_count=%s face_count=%s coord_count=%s first_full=%s first_face=%s first_bbox=%s silent_shape=%s",
+        avatar_path,
+        len(frame_list_cycle),
+        len(face_list_cycle),
+        len(coord_list_cycle),
+        first_full,
+        first_face,
+        first_bbox,
+        silent_shape,
+    )
+    if frame_list_cycle and face_list_cycle and coord_list_cycle:
+        y1, y2, x1, x2 = coord_list_cycle[0]
+        logger.debug(
+            "Avatar first frame crop size: bbox=%sx%s face=%sx%s",
+            x2 - x1,
+            y2 - y1,
+            face_list_cycle[0].shape[1],
+            face_list_cycle[0].shape[0],
+        )
 
 @torch.no_grad()
 def warm_up(batch_size,model,modelres):
@@ -263,11 +304,23 @@ def inference(quit_event,batch_size,real,audio_feat_queue,audio_out_queue,res_fr
                     mel_batch.device,
                     mel_batch.dtype,
                 )
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "Wav2Lip batch shapes: img=%s mel=%s",
+                        img_batch.shape,
+                        mel_batch.shape,
+                    )
                 logged_runtime_device = True
 
             with torch.no_grad():
                 pred = model(mel_batch, img_batch)
             pred = pred.float().cpu().numpy().transpose(0, 2, 3, 1) * 255.
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    "Wav2Lip output batch shape=%s dtype=%s",
+                    pred.shape,
+                    pred.dtype,
+                )
 
             counttime += (time.perf_counter() - t)
             count += batch_size
@@ -324,6 +377,15 @@ class LipReal(BaseReal):
         combine_frame = copy.deepcopy(self.frame_list_cycle[safe_idx])
         #combine_frame = copy.deepcopy(self.imagecache.get_img(idx))
         y1, y2, x1, x2 = bbox
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "paste_back_frame: idx=%s safe_idx=%s bbox=%s pred_shape=%s base_shape=%s",
+                idx,
+                safe_idx,
+                bbox,
+                None if pred_frame is None else pred_frame.shape,
+                combine_frame.shape,
+            )
         res_frame = cv2.resize(pred_frame.astype(np.uint8),(x2-x1,y2-y1))
         #combine_frame = get_image(ori_frame,res_frame,bbox)
         #t=time.perf_counter()
@@ -337,6 +399,7 @@ class LipReal(BaseReal):
 
     def reload_avatar(self, avatar_id):
         self.opt.avatar_id = avatar_id
+        logger.info("Reloading avatar: avatar_id=%s avatar_dir=%s", avatar_id, self.opt.AVATAR_DIR)
         self.frame_list_cycle, self.face_list_cycle, self.coord_list_cycle, self.silence_frame = load_avatar(
             avatar_id,
             self.opt.AVATAR_DIR,

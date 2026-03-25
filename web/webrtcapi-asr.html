@@ -96,6 +96,17 @@
             line-height: 1.2;
         }
 
+        .hero-badge {
+            flex: 0 0 auto;
+        }
+
+        .hero-session {
+            flex: 0 0 auto;
+            color: var(--muted);
+            font-size: 12px;
+            white-space: nowrap;
+        }
+
         .hero-side {
             display: flex;
             align-items: center;
@@ -876,16 +887,18 @@
 
     <div class="panel">
         <div class="panel-body panel-scroll">
-            <div class="right-hero">
-                <div class="right-hero-title">
-                    <h1>数字人</h1>
-                    <div class="hero-status" id="connection-status" title="WebRTC connected. You can record, upload audio, or type text.">WebRTC connected. You can record, upload audio, or type text.</div>
-                </div>
-                <div class="right-hero-controls">
-                    <label style="display:flex;align-items:center;gap:8px;margin:0;">
-                        <input id="use-stun" type="checkbox"/>
-                        <span>开启网络</span>
-                    </label>
+                <div class="right-hero">
+                    <div class="right-hero-title">
+                        <h1>数字人</h1>
+                        <div class="hero-status" id="connection-status" title="WebRTC connected. You can record, upload audio, or type text.">WebRTC connected. You can record, upload audio, or type text.</div>
+                    </div>
+                    <div class="right-hero-controls">
+                        <div class="badge hero-badge" id="connection-badge">Disconnected</div>
+                        <div class="hero-session">Session <span id="session-text">0</span></div>
+                        <label style="display:flex;align-items:center;gap:8px;margin:0;">
+                            <input id="use-stun" type="checkbox"/>
+                            <span>开启网络</span>
+                        </label>
                     <button id="open-settings" class="ghost" type="button">设置</button>
                 </div>
             </div>
@@ -942,6 +955,7 @@
                 <button class="tab-button active" type="button" data-tab="tts">TTS</button>
                 <button class="tab-button" type="button" data-tab="asr">ASR</button>
                 <button class="tab-button" type="button" data-tab="avatars">avatars</button>
+                <button class="tab-button" type="button" data-tab="runtime">运行</button>
                 <button class="tab-button" type="button" data-tab="materials">素材管理</button>
                 <button class="tab-button" type="button" data-tab="llm">LLM</button>
             </div>
@@ -1046,6 +1060,21 @@
                             <tbody id="avatar-table-body"></tbody>
                         </table>
                     </div>
+                </div>
+            </div>
+
+            <div class="tab-panel" data-panel="runtime">
+                <div class="section-note">
+                    这里控制运行时日志级别。排查问题时建议切到 DEBUG，平时保持 INFO。
+                </div>
+                <div style="margin-top:12px;max-width:320px;">
+                    <label for="runtime-log-level">日志级别</label>
+                    <select id="runtime-log-level">
+                        <option value="DEBUG">DEBUG</option>
+                        <option value="INFO">INFO</option>
+                        <option value="WARNING">WARNING</option>
+                        <option value="ERROR">ERROR</option>
+                    </select>
                 </div>
             </div>
 
@@ -1196,7 +1225,10 @@ function updateStatus(text) {
 }
 
 function setConnectionBadge(text) {
-    document.getElementById('connection-badge').textContent = text;
+    const node = document.getElementById('connection-badge');
+    if (node) {
+        node.textContent = text;
+    }
 }
 
 function setConnectionStatus(text) {
@@ -1976,6 +2008,14 @@ function normalizeLlmMode(mode) {
     return normalized;
 }
 
+function normalizeLogLevel(level) {
+    const normalized = String(level || '').trim().toUpperCase();
+    if (normalized === 'DEBUG' || normalized === 'INFO' || normalized === 'WARNING' || normalized === 'ERROR') {
+        return normalized;
+    }
+    return 'INFO';
+}
+
 let ttsConfigCache = {
     vits_zh: {},
     vits_melo_zh_en: {},
@@ -1995,6 +2035,9 @@ let llmModeOptionsCache = [];
 let avatarOptionsCache = [];
 let currentAvatarIdCache = '';
 let avatarSilenceGateCache = {};
+let runtimeConfigCache = {
+    log_level: 'INFO'
+};
 
 function getLlmModeLabel(mode) {
     const normalized = normalizeLlmMode(mode) || 'openai_chat';
@@ -2165,6 +2208,7 @@ async function loadSettings() {
     const ttsZhEn = (((data.tts || {}).vits_melo_zh_en) || {});
     const edge = (((data.tts || {}).edgetts) || {});
     const asr = (((data.asr || {}).paraformer) || {});
+    const runtime = data.runtime || {};
     const llmPayload = data.llm || {};
     const providers = data.providers || {};
     const meta = data.meta || {};
@@ -2202,6 +2246,9 @@ async function loadSettings() {
     avatarOptionsCache = avatarOptions;
     currentAvatarIdCache = String(meta.current_avatar_id || (avatarOptions[0] && avatarOptions[0].id) || '');
     avatarSilenceGateCache = {};
+    runtimeConfigCache = {
+        log_level: normalizeLogLevel(runtime.log_level || 'INFO')
+    };
     avatarOptions.forEach((item) => {
         if (item && item.id) {
             avatarSilenceGateCache[item.id] = Boolean(item.silence_gate_enabled);
@@ -2248,6 +2295,10 @@ async function loadSettings() {
     document.getElementById('asr-batch-size').value = String(asr.batch_size_s ?? 300);
     document.getElementById('asr-hotwords').value = asr.hotwords || '';
     document.getElementById('asr-phonetic-replacements').value = asr.phonetic_replacements || '';
+    const runtimeLogLevelSelect = document.getElementById('runtime-log-level');
+    if (runtimeLogLevelSelect) {
+        runtimeLogLevelSelect.value = runtimeConfigCache.log_level;
+    }
     updateSettingsSummary(currentEngine, currentLlmMode, currentAvatarIdCache);
 }
 async function saveSettings() {
@@ -2275,6 +2326,9 @@ async function saveSettings() {
         providers: {
             tts: selectedEngine,
             llm: selectedLlmMode
+        },
+        runtime: {
+            log_level: normalizeLogLevel(document.getElementById('runtime-log-level').value)
         },
         avatar_id: selectedAvatarId,
         avatar_silence_gate_by_avatar: avatarSilenceGateByAvatar,
@@ -2330,6 +2384,9 @@ async function saveSettings() {
                 avatarSilenceGateCache[item.id] = Boolean(item.silence_gate_enabled);
             }
         });
+        runtimeConfigCache = {
+            log_level: normalizeLogLevel((savedData.runtime || {}).log_level || document.getElementById('runtime-log-level').value)
+        };
     }
     renderAvatarTable();
     renderAvatarMaterialsTable();
@@ -2612,7 +2669,10 @@ document.getElementById('clear-dialog-history').addEventListener('click', () => 
 });
 
 window.addEventListener('livetalking:sessionchange', (event) => {
-    document.getElementById('session-text').textContent = String((event.detail && event.detail.sessionid) || 0);
+    const node = document.getElementById('session-text');
+    if (node) {
+        node.textContent = String((event.detail && event.detail.sessionid) || 0);
+    }
 });
 
 window.addEventListener('livetalking:connectionstate', function (event) {

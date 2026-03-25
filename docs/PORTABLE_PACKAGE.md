@@ -94,7 +94,7 @@ LiveTalking-portable-win64-nvidia-cu128/
 输出：
 
 - `dist/LiveTalking-portable-win64-nvidia-cu128/`
-- `dist/LiveTalking-portable-win64-nvidia-cu128.zip`
+- `dist/LiveTalking-portable-win64-nvidia-cu128.zip`（仅在显式开启压缩时生成）
 
 ## 目标机使用方式
 

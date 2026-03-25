@@ -50,7 +50,7 @@ from .config.app_config import (
 )
 from .providers.llm_client import configure_llm, llm_response
 from .providers.local_asr import ParaformerProvider, decode_audio_to_pcm16
-from .utils.app_logger import logger
+from .utils.app_logger import configure_logging, logger
 from .providers.sherpa_tts import SherpaOnnxVitsTTS
 from .realtime.webrtc import HumanPlayer
 
@@ -569,6 +569,21 @@ def json_response(payload: dict, status: int = 200) -> web.Response:
     )
 
 
+def _get_local_non_loopback_ipv4_addresses() -> list[str]:
+    preferred: list[str] = []
+    try:
+        for family, _, _, _, sockaddr in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            address = sockaddr[0]
+            ip = ipaddress.ip_address(address)
+            if ip.is_loopback or ip.is_link_local:
+                continue
+            if address not in preferred:
+                preferred.append(address)
+    except socket.gaierror:
+        pass
+    return preferred
+
+
 def patched_get_host_addresses(use_ipv4: bool, use_ipv6: bool) -> list[str]:
     if use_ipv4 and _preferred_ice_addresses:
         return list(_preferred_ice_addresses)
@@ -590,20 +605,8 @@ def get_session_real(sessionid: int) -> BaseReal:
 
 def resolve_preferred_ice_addresses(request: web.Request) -> list[str]:
     host = request.host.split(":")[0].strip().lower()
-    if host in {"127.0.0.1", "localhost"}:
-        return ["127.0.0.1"]
 
-    preferred: list[str] = []
-    try:
-        for family, _, _, _, sockaddr in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
-            address = sockaddr[0]
-            ip = ipaddress.ip_address(address)
-            if ip.is_loopback or ip.is_link_local:
-                continue
-            if address not in preferred:
-                preferred.append(address)
-    except socket.gaierror:
-        pass
+    preferred = _get_local_non_loopback_ipv4_addresses()
 
     if host and host not in {"0.0.0.0"}:
         try:
@@ -615,12 +618,16 @@ def resolve_preferred_ice_addresses(request: web.Request) -> list[str]:
 
     if preferred:
         return preferred
+    if host in {"127.0.0.1", "localhost"}:
+        return ["127.0.0.1"]
     return _ORIGINAL_GET_HOST_ADDRESSES(use_ipv4=True, use_ipv6=False)
 
 
 def should_force_loopback_mdns(request: web.Request) -> bool:
     host = request.host.split(":")[0].strip().lower()
-    return host in {"127.0.0.1", "localhost"}
+    if host not in {"127.0.0.1", "localhost"}:
+        return False
+    return not _get_local_non_loopback_ipv4_addresses()
 
 
 def rewrite_local_mdns_candidates(sdp: str) -> str:
@@ -957,6 +964,7 @@ def apply_runtime_settings(payload: dict) -> None:
         raise RuntimeError("runtime is not initialized")
 
     providers_config = payload.get("providers", {})
+    runtime_config = payload.get("runtime", {})
     tts_payload = payload.get("tts", {})
     edge_config = tts_payload.get("edgetts", {})
     llm_payload = payload.get("llm", {})
@@ -983,6 +991,12 @@ def apply_runtime_settings(payload: dict) -> None:
         if selected_llm not in SUPPORTED_LLM_MODES:
             raise ValueError(f"Unsupported LLM provider: {selected_llm}")
         app_config.providers.llm = selected_llm
+
+    if "log_level" in runtime_config:
+        log_level = str(runtime_config["log_level"]).strip().upper() or "INFO"
+        app_config.runtime.log_level = log_level
+        configure_logging(log_level)
+        logger.info("Logging level updated to %s", log_level)
 
     if avatar_id:
         available_avatar_ids = {item["id"] for item in list_available_avatar_ids()}
@@ -1383,6 +1397,8 @@ def bootstrap_runtime(args):
     global app_config, opt, model, avatar, speech_recognizer
 
     app_config = load_app_config(args.config, project_root=REPO_ROOT)
+    configure_logging(getattr(app_config.runtime, "log_level", "INFO"))
+    logger.info("Logging level configured: %s", getattr(app_config.runtime, "log_level", "INFO"))
     if not getattr(args, "tts", ""):
         args.tts = app_config.providers.tts
     validate_supported_modes(args)

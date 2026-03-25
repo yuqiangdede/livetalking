@@ -6,6 +6,7 @@
 
 runtime:
   temp_dir: runtime/tmp
+  log_level: INFO
 
 asr:
   paraformer:
