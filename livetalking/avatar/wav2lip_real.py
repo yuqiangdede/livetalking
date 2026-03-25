@@ -481,7 +481,7 @@ class LipReal(BaseReal):
                 res_qsize = self.res_frame_queue.qsize()
                 video_qsize = video_track._queue.qsize() if video_track is not None else -1
                 audio_qsize = audio_track._queue.qsize() if audio_track is not None else -1
-                logger.info(
+                logger.debug(
                     "lip-sync process avg fps=%.4f res_q=%s video_q=%s audio_q=%s speaking=%s",
                     output_count / output_time,
                     res_qsize,

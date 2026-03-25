@@ -1421,6 +1421,7 @@ def create_web_app() -> web.Application:
     appasync.on_shutdown.append(on_shutdown)
     appasync.router.add_get("/", lambda request: web.FileResponse(REPO_ROOT / "web" / "index.html"))
     appasync.router.add_get("/webrtcapi-asr.html", lambda request: web.FileResponse(REPO_ROOT / "web" / "webrtcapi-asr.html"))
+    appasync.router.add_get("/client.js", lambda request: web.FileResponse(REPO_ROOT / "web" / "client.js"))
     appasync.router.add_post("/offer", offer)
     appasync.router.add_post("/human", human)
     appasync.router.add_post("/humanaudio", humanaudio)

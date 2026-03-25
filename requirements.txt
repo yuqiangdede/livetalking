@@ -1,4 +1,4 @@
-numpy
+numpy==1.22.0
 opencv-python
 PyYAML==6.0.2
 tqdm

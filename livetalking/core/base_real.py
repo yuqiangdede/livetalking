@@ -43,6 +43,7 @@ from threading import Lock
 from ..providers.sherpa_tts import SherpaOnnxVitsTTS
 from ..providers.tts_engines import EdgeTTS
 from ..utils.app_logger import logger
+from ..utils.runtime_paths import resolve_ffmpeg_executable
 
 from tqdm import tqdm
 def read_imgs(img_list):
@@ -208,7 +209,9 @@ class BaseReal:
         if self.recording:
             return
 
-        command = ['ffmpeg',
+        ffmpeg_exe = resolve_ffmpeg_executable()
+
+        command = [ffmpeg_exe,
                     '-y', '-an',
                     '-f', 'rawvideo',
                     '-vcodec','rawvideo',
@@ -222,7 +225,7 @@ class BaseReal:
                     f'temp{self.opt.sessionid}.mp4']
         self._record_video_pipe = subprocess.Popen(command, shell=False, stdin=subprocess.PIPE)
 
-        acommand = ['ffmpeg',
+        acommand = [ffmpeg_exe,
                     '-y', '-vn',
                     '-f', 's16le',
                     #'-acodec','pcm_s16le',
@@ -297,13 +300,26 @@ class BaseReal:
         """停止录制视频"""
         if not self.recording:
             return
+        ffmpeg_exe = resolve_ffmpeg_executable()
         self.recording = False 
         self._record_video_pipe.stdin.close()  #wait() 
         self._record_video_pipe.wait()
         self._record_audio_pipe.stdin.close()
         self._record_audio_pipe.wait()
-        cmd_combine_audio = f"ffmpeg -y -i temp{self.opt.sessionid}.aac -i temp{self.opt.sessionid}.mp4 -c:v copy -c:a copy data/record.mp4"
-        os.system(cmd_combine_audio) 
+        combine_command = [
+            ffmpeg_exe,
+            "-y",
+            "-i",
+            f"temp{self.opt.sessionid}.aac",
+            "-i",
+            f"temp{self.opt.sessionid}.mp4",
+            "-c:v",
+            "copy",
+            "-c:a",
+            "copy",
+            "data/record.mp4",
+        ]
+        subprocess.run(combine_command, check=True)
         #os.remove(output_path)
 
     def mirror_index(self,size, index):
@@ -482,7 +498,7 @@ class BaseReal:
                 res_qsize = self.res_frame_queue.qsize()
                 video_qsize = video_track._queue.qsize() if video_track is not None else -1
                 audio_qsize = audio_track._queue.qsize() if audio_track is not None else -1
-                logger.info(
+                logger.debug(
                     "lip-sync process avg fps=%.4f res_q=%s video_q=%s audio_q=%s speaking=%s",
                     output_count / output_time,
                     res_qsize,

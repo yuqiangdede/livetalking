@@ -16,6 +16,7 @@ import av
 import numpy as np
 
 from ..utils.app_logger import logger
+from ..utils.runtime_paths import resolve_ffmpeg_executable
 from .asr_enhancements import apply_phonetic_replacements, parse_hotword_lines, parse_phonetic_replacements
 from .local_punc import CTTransformerPunctuationRestorer
 
@@ -116,9 +117,9 @@ def _write_pcm_to_wav(audio_bytes: bytes, sample_rate: int, temp_dir: str | None
 
 
 def _decode_audio_with_ffmpeg(audio_bytes: bytes, sample_rate: int) -> tuple[bytes, int]:
-    ffmpeg_exe = shutil.which("ffmpeg")
+    ffmpeg_exe = resolve_ffmpeg_executable(required=False)
     if not ffmpeg_exe:
-        raise RuntimeError("ffmpeg is not available in PATH")
+        raise RuntimeError("ffmpeg is not available. Expected tools\\ffmpeg\\bin\\ffmpeg.exe or a PATH entry.")
 
     cmd = [
         ffmpeg_exe,

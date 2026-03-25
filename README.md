@@ -1,54 +1,41 @@
 # LiveTalking Local
 
-本项目基于 [lipku/LiveTalking](https://github.com/lipku/LiveTalking) fork，并整理为一条可维护的本地运行链路：
+本项目基于 [lipku/LiveTalking](https://github.com/lipku/LiveTalking) 整理，当前保留并维护的主链路为：
 
 `wav2lip + Paraformer + sherpa-onnx / EdgeTTS + LLM + WebRTC`
 
-这次整理的目标不是保留上游全部能力，而是把仓库收敛到适合继续维护、公开上传和本地部署的最小可用方案。
+当前仓库同时支持两种使用方式：
 
-## 当前保留范围
-
-- 数字人渲染：`wav2lip`
-- 语音识别：`Paraformer + 标点恢复`
-- 语音合成：`sherpa-onnx`、`EdgeTTS`
-- 对话：OpenAI-compatible LLM / LM Studio
-- 交互方式：`WebRTC` 浏览器控制台
-
-## 当前已清理
-
-- 历史 Web 演示页和 `rtcpush` 相关页面
-- 非当前主链路的 TTS 适配器逻辑
-- 本地缓存、运行日志、`__pycache__`
-- 带机器绝对路径的配置和脚本默认值
-- 仓库内明文 API Key
-- 大型模型和头像资源保持本地目录，不随仓库上传
+- 开发运行：使用项目根目录 `.venv`
+- 稳定绿色包：使用项目根目录 `python/`、`tools/ffmpeg/`，打成可复制的便携目录包
 
 ## 项目结构
 
 ```text
 app.py
-livetalking/
 configs/
 data/
+docs/
+livetalking/
 models/
 runtime/
 scripts/
-tests/
+tools/
 wav2lip/
 web/
-docs/
 ```
 
 结构说明见 [docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md)。
 
 ## 运行要求
 
-- Python `3.10`
-- 项目内虚拟环境：`.venv`
-- 模型、头像、临时文件全部位于项目目录内
-- 默认入口为浏览器控制台 `WebRTC`
+- Windows x64
+- Python 3.10
+- NVIDIA GPU
+- 浏览器
+- 所有模型、头像、运行时文件均位于项目目录内
 
-## 快速启动
+## 开发运行
 
 ```powershell
 py -3.10 -m venv .venv
@@ -59,9 +46,39 @@ py -3.10 -m venv .venv
 .\.venv\Scripts\python.exe .\app.py
 ```
 
-启动后打开：
+启动后访问：
 
 `http://127.0.0.1:8010/`
+
+## 稳定绿色包
+
+稳定绿色包不是单文件 `exe`，而是参考 ComfyUI portable 的整目录分发模式：
+
+- 项目内 `python/` 提供独立 Python 运行时
+- 项目内 `tools/ffmpeg/bin/` 提供独立 ffmpeg
+- 项目内 `models/`、`data/avatars/` 提供运行资源
+- 启动入口为 `start_nvidia_gpu.bat`
+
+构建步骤：
+
+1. 准备便携运行时：
+
+```powershell
+.\scripts\prepare_portable_runtime.ps1
+```
+
+2. 生成稳定绿色包：
+
+```powershell
+.\scripts\build_portable_package.ps1
+```
+
+产物：
+
+- `dist/LiveTalking-portable-win64-nvidia-cu128/`
+- `dist/LiveTalking-portable-win64-nvidia-cu128.zip`
+
+详细说明见 [docs/PORTABLE_PACKAGE.md](docs/PORTABLE_PACKAGE.md)。
 
 ## 配置说明
 
@@ -71,7 +88,7 @@ py -3.10 -m venv .venv
   - `LIVETALKING_OPENAI_API_KEY`
   - `OPENAI_API_KEY`
 
-`configs/app.yaml` 已清理为可公开提交的安全默认值，不再包含本地私有密钥。
+`configs/app.yaml` 继续使用项目内相对路径，不依赖开发机绝对路径。
 
 ## 资源目录约定
 
@@ -82,25 +99,8 @@ py -3.10 -m venv .venv
 - 运行日志：`runtime/logs/`
 - 临时文件：`runtime/tmp/`
 
-当前公开仓库只保留目录结构、说明文档和代码文件，模型、权重和头像素材请在项目目录内本地准备。
-
 ## 辅助脚本
 
 - 资源准备：`scripts/prepare_local_assets.ps1`
-- 单元测试：`tests/`
-
-## 主要接口
-
-- `POST /offer`
-- `POST /human`
-- `POST /humanaudio`
-- `POST /api/asr/transcribe`
-- `POST /api/dialog/add`
-- `GET /api/dialog/history`
-- `POST /api/dialog/clear`
-- `POST /set_silence_gate`
-- `POST /record`
-- `POST /interrupt_talk`
-- `POST /is_speaking`
-- `GET /api/runtime/config`
-- `POST /api/runtime/config`
+- 便携运行时准备：`scripts/prepare_portable_runtime.ps1`
+- 稳定绿色包打包：`scripts/build_portable_package.ps1`

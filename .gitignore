@@ -7,6 +7,10 @@ build/
 dist/
 .DS_Store
 .idea/
+python/
+offline_wheels/
+tools/ffmpeg/bin/*
+!tools/ffmpeg/bin/.gitkeep
 
 runtime/logs/*
 !runtime/logs/.gitkeep
