@@ -1474,8 +1474,8 @@ def main() -> None:
 
     args = build_arg_parser().parse_args()
     bootstrap_runtime(args)
-    logger.info("start http server; http://<serverip>:%s/", opt.listenport)
-    logger.info("主控台页面: http://<serverip>:%s/", opt.listenport)
+    logger.info("start http server; port=%s", opt.listenport)
+    logger.info("主控台页面: http://127.0.0.1:%s/webrtcapi-asr.html", opt.listenport)
     run_server(web.AppRunner(create_web_app()))
 
 
