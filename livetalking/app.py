@@ -22,6 +22,7 @@ import asyncio
 import ipaddress
 import json
 import logging
+from functools import lru_cache
 import random
 import re
 import shutil
@@ -49,7 +50,10 @@ from .config.app_config import (
     save_app_config,
 )
 from .providers.llm_client import configure_llm, llm_response
+from .providers.coqui_xtts_tts import CoquiXTTSV2TTS, is_coqui_xtts_runtime_available
 from .providers.local_asr import ParaformerProvider, decode_audio_to_pcm16
+from .providers.qwen_tts import QwenCustomVoiceTTS, is_qwen_tts_runtime_available
+from .providers.pyttsx3_tts import Pyttsx3TTS, list_pyttsx3_voice_options
 from .utils.app_logger import configure_logging, logger
 from .providers.sherpa_tts import SherpaOnnxVitsTTS
 from .realtime.webrtc import HumanPlayer
@@ -74,6 +78,9 @@ logging.getLogger("aioice").setLevel(logging.INFO)
 logging.getLogger("aiortc").setLevel(logging.INFO)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+COQUI_REFERENCE_ROOT_REL = Path("data") / "tts" / "coqui_xtts_v2"
+COQUI_REFERENCE_UPLOADS_REL = COQUI_REFERENCE_ROOT_REL / "references"
+COQUI_DEFAULT_REFERENCE_REL = COQUI_REFERENCE_ROOT_REL / "reference.wav"
 
 
 class InvalidSessionError(RuntimeError):
@@ -83,7 +90,10 @@ class InvalidSessionError(RuntimeError):
 SUPPORTED_TTS_ENGINES = {
     "vits_zh",
     "vits_melo_zh_en",
+    "qwen3_customvoice",
+    "coqui_xtts_v2",
     "edgetts",
+    "pyttsx3",
 }
 
 SUPPORTED_LLM_MODES = {
@@ -108,17 +118,67 @@ TTS_VOICE_OPTIONS_BY_ENGINE = {
     "vits_melo_zh_en": [
         {"id": 1, "label": "默认音色"},
     ],
+    "qwen3_customvoice": [
+        {"id": "Vivian", "label": "Vivian"},
+        {"id": "Serena", "label": "Serena"},
+        {"id": "Uncle_Fu", "label": "Uncle_Fu"},
+        {"id": "Dylan", "label": "Dylan"},
+        {"id": "Eric", "label": "Eric"},
+        {"id": "Ryan", "label": "Ryan"},
+        {"id": "Aiden", "label": "Aiden"},
+        {"id": "Ono_Anna", "label": "Ono_Anna"},
+        {"id": "Sohee", "label": "Sohee"},
+    ],
+    "coqui_xtts_v2": [],
     "edgetts": [],
+    "pyttsx3": [],
 }
 
 def get_tts_voice_options(engine: str | None) -> list[dict]:
     normalized = normalize_tts_engine(engine)
+    if normalized == "pyttsx3":
+        driver_name = ""
+        if app_config is not None:
+            driver_name = str(getattr(app_config.tts.pyttsx3, "driver_name", "") or "")
+        return list(_get_pyttsx3_voice_options(driver_name))
     return list(TTS_VOICE_OPTIONS_BY_ENGINE.get(normalized, TTS_VOICE_OPTIONS_BY_ENGINE["vits_zh"]))
 
+
+def get_tts_voice_options_by_engine() -> dict[str, list[dict]]:
+    options = dict(TTS_VOICE_OPTIONS_BY_ENGINE)
+    options["pyttsx3"] = get_tts_voice_options("pyttsx3")
+    return options
+
+
+def _build_tts_engine_description(engine: str) -> str:
+    normalized = str(engine or "").strip().lower().replace("-", "_")
+    if normalized in {"", "sherpa_onnx_vits"}:
+        normalized = "vits_zh"
+    elif normalized in {"sherpa_onnx_vits_zh_en", "sherpa_onnx_melo_tts_zh_en", "vits_melo_tts_zh_en"}:
+        normalized = "vits_melo_zh_en"
+    elif normalized in {"qwen3_tts", "qwen3_tts_customvoice", "qwen_customvoice"}:
+        normalized = "qwen3_customvoice"
+    elif normalized in {"coqui_tts", "xtts", "xtts_v2"}:
+        normalized = "coqui_xtts_v2"
+    elif normalized == "sapi5":
+        normalized = "pyttsx3"
+    descriptions = {
+        "pyttsx3": "名称：pyttsx3；支持语言：取决于本机系统语音；CPU/GPU：CPU；是否联网：否；特殊注意点：默认使用系统音色，driverName 留空为自动，voice_id 仅在本机已安装语音时有效。",
+        "edgetts": "名称：Microsoft Edge TTS；支持语言：多语言语音；CPU/GPU：CPU；是否联网：是；特殊注意点：需要可访问微软在线服务，语速使用百分比字符串。",
+        "vits_zh": "名称：Sherpa-ONNX VITS 中文；支持语言：中文；CPU/GPU：GPU 优先，CPU 可运行但不推荐；是否联网：否；特殊注意点：默认使用 CUDA provider，模型文件位于项目内，适合离线运行。",
+        "vits_melo_zh_en": "名称：Sherpa-ONNX Melo zh/en；支持语言：中文 / 英文；CPU/GPU：GPU 优先，CPU 可运行但不推荐；是否联网：否；特殊注意点：默认使用 CUDA provider，模型文件位于项目内，适合离线运行。",
+        "qwen3_customvoice": "名称：Qwen3-TTS CustomVoice；支持语言：中文 / 英文 / 日文 / 韩文；CPU/GPU：高性能GPU推荐，CPU 可运行但较慢；是否联网：否；特殊注意点：需要项目内模型与 tokenizer。",
+        "coqui_xtts_v2": "名称：Coqui XTTS v2；支持语言：多语言语音克隆，当前界面开放中文 / 英文；CPU/GPU：高性能GPU推荐，CPU 可运行但较慢；是否联网：否；特殊注意点：需要项目内模型和参考音频，支持可调语速。",
+    }
+    return descriptions.get(normalized, normalized)
+
 TTS_ENGINE_OPTIONS = [
-    {"id": "vits_zh", "label": "vits-zh", "desc": "本地中文 TTS，模型为 k2-fsa/sherpa-onnx-vits-zh-ll。"},
-    {"id": "vits_melo_zh_en", "label": "vits-melo-zh_en", "desc": "本地中英 TTS，模型为 vits-melo-tts-zh_en。"},
-    {"id": "edgetts", "label": "EdgeTTS", "desc": "在线 TTS，适合英文单词和中英混读。"},
+    {"id": "pyttsx3", "label": "pyttsx3", "desc": _build_tts_engine_description("pyttsx3")},
+    {"id": "edgetts", "label": "EdgeTTS", "desc": _build_tts_engine_description("edgetts")},
+    {"id": "vits_zh", "label": "vits-zh", "desc": _build_tts_engine_description("vits_zh")},
+    {"id": "vits_melo_zh_en", "label": "vits-melo-zh_en", "desc": _build_tts_engine_description("vits_melo_zh_en")},
+    {"id": "qwen3_customvoice", "label": "Qwen3-TTS CustomVoice", "desc": _build_tts_engine_description("qwen3_customvoice")},
+    {"id": "coqui_xtts_v2", "label": "Coqui XTTS v2", "desc": _build_tts_engine_description("coqui_xtts_v2")},
 ]
 
 LLM_MODE_OPTIONS = [
@@ -134,9 +194,55 @@ def normalize_tts_engine(value: str | None) -> str:
         return "vits_zh"
     if engine in {"sherpa_onnx_vits_zh_en", "vits_melo_tts_zh_en", "sherpa_onnx_melo_tts_zh_en", "vits_melo_zh_en"}:
         return "vits_melo_zh_en"
+    if engine in {"qwen3_tts", "qwen3_customvoice", "qwen3_tts_customvoice", "qwen_customvoice"}:
+        return "qwen3_customvoice"
+    if engine in {"coqui_tts", "coqui_xtts_v2", "xtts", "xtts_v2"}:
+        return "coqui_xtts_v2"
     if engine == "edgetts":
         return "edgetts"
+    if engine in {"pyttsx3", "pyttsx3_tts", "pyttsx3_sapi5", "sapi5"}:
+        return "pyttsx3"
     return engine
+
+
+def _is_qwen_runtime_ready() -> bool:
+    if app_config is None or not is_qwen_tts_runtime_available():
+        return False
+
+    qwen_config = app_config.tts.qwen3_customvoice
+    model_dir = Path(resolve_project_path(app_config, qwen_config.model_dir))
+    tokenizer_dir = Path(resolve_project_path(app_config, qwen_config.tokenizer_dir))
+    return model_dir.is_dir() and tokenizer_dir.is_dir()
+
+
+def _is_coqui_runtime_ready() -> bool:
+    if app_config is None or not is_coqui_xtts_runtime_available():
+        return False
+
+    coqui_config = app_config.tts.coqui_xtts_v2
+    model_dir = Path(resolve_project_path(app_config, coqui_config.model_dir))
+    speaker_wav_path = Path(resolve_project_path(app_config, coqui_config.speaker_wav_path))
+    return model_dir.is_dir() and speaker_wav_path.is_file()
+
+
+def resolve_available_tts_engine(engine: str | None) -> str:
+    normalized = normalize_tts_engine(engine)
+    if normalized == "qwen3_customvoice" and not _is_qwen_runtime_ready():
+        logger.warning("Qwen TTS is not available in this runtime, falling back to vits_zh.")
+        return "vits_zh"
+    if normalized == "coqui_xtts_v2" and not _is_coqui_runtime_ready():
+        logger.warning("Coqui XTTS v2 is not available in this runtime, falling back to vits_zh.")
+        return "vits_zh"
+    return normalized
+
+
+def _is_tts_engine_available(engine: str | None) -> bool:
+    normalized = normalize_tts_engine(engine)
+    if normalized == "qwen3_customvoice":
+        return _is_qwen_runtime_ready()
+    if normalized == "coqui_xtts_v2":
+        return _is_coqui_runtime_ready()
+    return normalized in SUPPORTED_TTS_ENGINES
 
 
 def normalize_llm_mode(value: str | None) -> str:
@@ -178,6 +284,98 @@ def get_tts_engine_meta(engine: str | None) -> dict:
         if item["id"] == normalized:
             return item
     return {"id": normalized, "label": normalized, "desc": normalized}
+
+
+@lru_cache(maxsize=4)
+def _get_pyttsx3_voice_options(driver_name: str) -> tuple[dict, ...]:
+    return tuple(list_pyttsx3_voice_options(driver_name or None))
+
+
+def _coqui_reference_root_path() -> Path:
+    if app_config is not None:
+        return Path(resolve_project_path(app_config, str(COQUI_REFERENCE_ROOT_REL)))
+    return REPO_ROOT / COQUI_REFERENCE_ROOT_REL
+
+
+def _coqui_default_reference_relpath() -> str:
+    return COQUI_DEFAULT_REFERENCE_REL.as_posix()
+
+
+def _normalize_coqui_reference_relpath(path_value: str | None) -> str:
+    raw = str(path_value or "").strip().replace("\\", "/")
+    if not raw:
+        return ""
+    candidate = Path(raw)
+    if candidate.is_absolute():
+        raise ValueError("Coqui reference wav must stay inside the project directory")
+    resolved_root = _coqui_reference_root_path().resolve()
+    resolved_candidate = (REPO_ROOT / candidate).resolve()
+    try:
+        relative = resolved_candidate.relative_to(REPO_ROOT.resolve())
+    except ValueError as exc:
+        raise ValueError("Coqui reference wav must stay inside the project directory") from exc
+    try:
+        resolved_candidate.relative_to(resolved_root)
+    except ValueError as exc:
+        raise ValueError("Coqui reference wav must stay inside data/tts/coqui_xtts_v2") from exc
+    if relative.suffix.lower() not in {".wav", ".mp3"}:
+        raise ValueError("Coqui reference audio must be a .wav or .mp3 file")
+    return relative.as_posix()
+
+
+def _list_coqui_reference_options() -> list[dict]:
+    root = _coqui_reference_root_path()
+    current_rel = ""
+    if app_config is not None:
+        current_rel = str(getattr(app_config.tts.coqui_xtts_v2, "speaker_wav_path", "") or "").replace("\\", "/")
+    options: list[dict] = []
+    seen: set[str] = set()
+    if root.is_dir():
+        reference_files = [
+            path for path in root.rglob("*")
+            if path.is_file() and path.suffix.lower() in {".wav", ".mp3"}
+        ]
+        for path in sorted(reference_files, key=lambda item: str(item.relative_to(root)).lower()):
+            rel_path = path.resolve().relative_to(REPO_ROOT.resolve()).as_posix()
+            if rel_path in seen:
+                continue
+            seen.add(rel_path)
+            is_default = rel_path == _coqui_default_reference_relpath()
+            label = "默认参考音频" if is_default else path.stem
+            options.append(
+                {
+                    "id": rel_path,
+                    "label": label,
+                    "desc": rel_path,
+                    "is_default": is_default,
+                    "is_current": rel_path == current_rel,
+                }
+            )
+    return options
+
+
+def _apply_coqui_reference_selection(speaker_wav_rel: str) -> None:
+    if app_config is None or opt is None:
+        raise RuntimeError("Runtime is not initialized")
+    normalized_rel = _normalize_coqui_reference_relpath(speaker_wav_rel)
+    target_path = Path(resolve_project_path(app_config, normalized_rel))
+    if not target_path.is_file():
+        raise FileNotFoundError(f"Coqui reference audio not found: {normalized_rel}")
+    app_config.tts.coqui_xtts_v2.speaker_wav_path = normalized_rel
+    opt.TTS_SPEAKER_WAV_PATH = str(target_path)
+    opt.REF_FILE = str(target_path)
+    for nerfreal in list(nerfreals.values()):
+        if nerfreal is None or not hasattr(nerfreal, "tts"):
+            continue
+        if hasattr(nerfreal.tts, "speaker_wav_path"):
+            nerfreal.tts.speaker_wav_path = target_path
+    save_app_config(app_config, getattr(opt, "CONFIG_PATH", None))
+
+
+def _sanitize_coqui_upload_filename(filename: str | None) -> str:
+    stem = Path(str(filename or "").strip()).stem
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "_", stem).strip("._-")
+    return stem or f"reference_{int(time.time())}"
 
 
 def _sorted_avatar_images(directory: str) -> list[Path]:
@@ -485,8 +683,7 @@ def get_current_tts_model_description() -> str:
     if app_config is None:
         return "k2-fsa/sherpa-onnx-vits-zh-ll"
     engine = getattr(app_config.providers, "tts", "vits_zh")
-    meta = get_tts_engine_meta(engine)
-    return str(meta.get("desc") or meta.get("label") or engine)
+    return _build_tts_engine_description(engine)
 
 
 def list_available_avatar_ids() -> list[dict]:
@@ -551,10 +748,29 @@ def warmup_runtime_resources() -> None:
     except Exception as exc:
         logger.warning("Avatar assets warmup skipped: avatar_id=%s error=%s", avatar_id, exc)
 
+    effective_tts = resolve_available_tts_engine(getattr(opt, "tts", ""))
+    if effective_tts != getattr(opt, "tts", ""):
+        opt.tts = effective_tts
+        app_config.providers.tts = effective_tts
+
     if opt.tts in SHERPA_TTS_ENGINES:
         tts_warmup = SherpaOnnxVitsTTS(opt, None)
         tts_warmup.warmup()
         logger.info("TTS model warmed up: engine=%s", opt.tts)
+    elif opt.tts == "qwen3_customvoice":
+        tts_warmup = QwenCustomVoiceTTS(opt, None)
+        tts_warmup.warmup()
+        logger.info("TTS model warmed up: engine=%s", opt.tts)
+    elif opt.tts == "coqui_xtts_v2":
+        tts_warmup = CoquiXTTSV2TTS(opt, None)
+        tts_warmup.warmup()
+        logger.info("TTS model warmed up: engine=%s", opt.tts)
+    elif opt.tts == "pyttsx3":
+        tts_warmup = Pyttsx3TTS(opt, None)
+        tts_warmup.warmup()
+        logger.info("TTS model warmed up: engine=%s", opt.tts)
+
+
 def randN(length: int) -> int:
     minimum = pow(10, length - 1)
     maximum = pow(10, length)
@@ -921,6 +1137,145 @@ async def transcribe_audio(request: web.Request) -> web.Response:
         return json_response({"code": -1, "msg": str(exc)}, status=500)
 
 
+async def upload_coqui_reference_wav(request: web.Request) -> web.Response:
+    try:
+        if app_config is None or opt is None:
+            raise RuntimeError("Runtime is not initialized")
+
+        form = await request.post()
+        if "file" not in form:
+            raise RuntimeError("missing form field: file")
+
+        fileobj = form["file"]
+        filename = str(getattr(fileobj, "filename", "") or "").strip()
+        if Path(filename).suffix.lower() != ".mp3":
+            raise RuntimeError("only .mp3 reference audio uploads are supported")
+        filebytes = fileobj.file.read()
+        if not filebytes:
+            raise RuntimeError("empty speaker wav upload")
+        upload_dir = Path(resolve_project_path(app_config, str(COQUI_REFERENCE_UPLOADS_REL)))
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        base_name = _sanitize_coqui_upload_filename(getattr(fileobj, "filename", "reference.mp3"))
+        target_path = upload_dir / f"{base_name}.mp3"
+        suffix = 2
+        while target_path.exists():
+            target_path = upload_dir / f"{base_name}_{suffix}.mp3"
+            suffix += 1
+        target_path.write_bytes(filebytes)
+        target_rel = target_path.resolve().relative_to(REPO_ROOT.resolve()).as_posix()
+        _apply_coqui_reference_selection(target_rel)
+
+        logger.info(
+            "Coqui XTTS reference audio uploaded filename=%s path=%s size=%s",
+            getattr(fileobj, "filename", ""),
+            target_path,
+            len(filebytes),
+        )
+        return json_response(
+            {
+                "code": 0,
+                "msg": "ok",
+                "data": {
+                    "speaker_wav_path": target_rel,
+                    "filename": getattr(fileobj, "filename", ""),
+                    "size": len(filebytes),
+                    "reference_options": _list_coqui_reference_options(),
+                },
+            }
+        )
+    except Exception as exc:
+        logger.exception("upload_coqui_reference_wav failed")
+        return json_response({"code": -1, "msg": str(exc)}, status=500)
+
+
+async def get_coqui_reference_wavs(request: web.Request) -> web.Response:
+    try:
+        if app_config is None:
+            raise RuntimeError("Runtime is not initialized")
+        return json_response(
+            {
+                "code": 0,
+                "msg": "ok",
+                "data": {
+                    "speaker_wav_path": str(getattr(app_config.tts.coqui_xtts_v2, "speaker_wav_path", "") or ""),
+                    "reference_options": _list_coqui_reference_options(),
+                },
+            }
+        )
+    except Exception as exc:
+        logger.exception("get_coqui_reference_wavs failed")
+        return json_response({"code": -1, "msg": str(exc)}, status=500)
+
+
+async def select_coqui_reference_wav(request: web.Request) -> web.Response:
+    try:
+        params = await request.json()
+        speaker_wav_path = str(params.get("speaker_wav_path", "")).strip()
+        if not speaker_wav_path:
+            raise ValueError("Missing speaker_wav_path")
+        _apply_coqui_reference_selection(speaker_wav_path)
+        return json_response(
+            {
+                "code": 0,
+                "msg": "ok",
+                "data": {
+                    "speaker_wav_path": speaker_wav_path.replace("\\", "/"),
+                    "reference_options": _list_coqui_reference_options(),
+                },
+            }
+        )
+    except Exception as exc:
+        logger.exception("select_coqui_reference_wav failed")
+        return json_response({"code": -1, "msg": str(exc)}, status=500)
+
+
+async def delete_coqui_reference_wav(request: web.Request) -> web.Response:
+    try:
+        params = await request.json()
+        if app_config is None:
+            raise RuntimeError("Runtime is not initialized")
+        speaker_wav_path = _normalize_coqui_reference_relpath(params.get("speaker_wav_path", ""))
+        if not speaker_wav_path:
+            raise ValueError("Missing speaker_wav_path")
+        if speaker_wav_path == _coqui_default_reference_relpath():
+            raise ValueError("默认参考音频不能删除")
+        target_path = Path(resolve_project_path(app_config, speaker_wav_path))
+        if not target_path.is_file():
+            raise FileNotFoundError(f"Coqui reference audio not found: {speaker_wav_path}")
+
+        current_rel = str(getattr(app_config.tts.coqui_xtts_v2, "speaker_wav_path", "") or "").replace("\\", "/")
+        fallback_rel = ""
+        if current_rel == speaker_wav_path:
+            remaining = [item for item in _list_coqui_reference_options() if str(item.get("id", "") or "") != speaker_wav_path]
+            for item in remaining:
+                if item.get("is_default"):
+                    fallback_rel = str(item.get("id", "") or "")
+                    break
+            if not fallback_rel and remaining:
+                fallback_rel = str(remaining[0].get("id", "") or "")
+            if not fallback_rel:
+                raise RuntimeError("至少保留一个 Coqui 参考音频后才能删除当前项")
+
+        target_path.unlink()
+
+        if current_rel == speaker_wav_path:
+            _apply_coqui_reference_selection(fallback_rel)
+
+        return json_response(
+            {
+                "code": 0,
+                "msg": "ok",
+                "data": {
+                    "speaker_wav_path": str(getattr(app_config.tts.coqui_xtts_v2, "speaker_wav_path", "") or ""),
+                    "reference_options": _list_coqui_reference_options(),
+                },
+            }
+        )
+    except Exception as exc:
+        logger.exception("delete_coqui_reference_wav failed")
+        return json_response({"code": -1, "msg": str(exc)}, status=500)
+
+
 async def set_silence_gate(request: web.Request) -> web.Response:
     try:
         params = await request.json()
@@ -1017,12 +1372,14 @@ def runtime_config_payload() -> dict:
 
     payload = asdict(app_config)
     payload.pop("project_root", None)
+    available_tts_engine_options = [item for item in TTS_ENGINE_OPTIONS if _is_tts_engine_available(item["id"])]
     payload["meta"] = {
         "config_path": getattr(opt, "CONFIG_PATH", ""),
         "settings_db_path": str(get_settings_db_path(REPO_ROOT)),
         "tts_voice_options": get_tts_voice_options(app_config.providers.tts),
-        "tts_voice_options_by_engine": TTS_VOICE_OPTIONS_BY_ENGINE,
-        "tts_engine_options": TTS_ENGINE_OPTIONS,
+        "tts_voice_options_by_engine": get_tts_voice_options_by_engine(),
+        "coqui_reference_options": _list_coqui_reference_options(),
+        "tts_engine_options": available_tts_engine_options,
         "llm_mode_options": LLM_MODE_OPTIONS,
         "avatar_options": list_available_avatar_ids(),
         "model_descriptions": {
@@ -1052,6 +1409,9 @@ def apply_runtime_settings(payload: dict) -> None:
     runtime_config = payload.get("runtime", {})
     tts_payload = payload.get("tts", {})
     edge_config = tts_payload.get("edgetts", {})
+    qwen_config = tts_payload.get("qwen3_customvoice", {})
+    coqui_config = tts_payload.get("coqui_xtts_v2", {})
+    pyttsx3_config = tts_payload.get("pyttsx3", {})
     llm_payload = payload.get("llm", {})
     asr_config = payload.get("asr", {}).get("paraformer", {})
     avatar_id = str(payload.get("avatar_id", getattr(app_config.avatar.wav2lip, "avatar_id", "avatar_1"))).strip()
@@ -1068,9 +1428,11 @@ def apply_runtime_settings(payload: dict) -> None:
     if "tts" in providers_config:
         if selected_tts not in SUPPORTED_TTS_ENGINES:
             raise ValueError(f"Unsupported TTS provider: {selected_tts}")
-        tts_engine_changed = selected_tts != app_config.providers.tts
-        app_config.providers.tts = selected_tts
-        opt.tts = selected_tts
+        resolved_tts = resolve_available_tts_engine(selected_tts)
+        tts_engine_changed = resolved_tts != app_config.providers.tts
+        app_config.providers.tts = resolved_tts
+        opt.tts = resolved_tts
+        selected_tts = resolved_tts
 
     if "llm" in providers_config:
         if selected_llm not in SUPPORTED_LLM_MODES:
@@ -1117,6 +1479,73 @@ def apply_runtime_settings(payload: dict) -> None:
             getattr(app_config.tts, selected_tts).provider = provider
             opt.TTS_PROVIDER = provider
             SherpaOnnxVitsTTS.reset_shared_tts()
+
+    if qwen_config:
+        current_qwen = app_config.tts.qwen3_customvoice
+        changed_model_setting = False
+        for field_name in ("model_dir", "tokenizer_dir", "device", "dtype", "attn_implementation", "speaker", "instruct", "language", "speed"):
+            if field_name not in qwen_config:
+                continue
+            if field_name == "speed":
+                new_value = float(qwen_config[field_name])
+            else:
+                new_value = str(qwen_config[field_name])
+            if getattr(current_qwen, field_name) != new_value:
+                setattr(current_qwen, field_name, new_value)
+                changed_model_setting = True
+        opt.TTS_MODEL_DIR = resolve_project_path(app_config, current_qwen.model_dir)
+        opt.TTS_TOKENIZER_DIR = resolve_project_path(app_config, current_qwen.tokenizer_dir)
+        opt.TTS_DEVICE = current_qwen.device
+        opt.TTS_DTYPE = current_qwen.dtype
+        opt.TTS_ATTN_IMPLEMENTATION = current_qwen.attn_implementation
+        opt.TTS_QWEN_SPEAKER = current_qwen.speaker
+        opt.TTS_QWEN_INSTRUCT = current_qwen.instruct
+        opt.TTS_QWEN_LANGUAGE = current_qwen.language
+        opt.TTS_QWEN_SPEED = current_qwen.speed
+        if changed_model_setting:
+            QwenCustomVoiceTTS.reset_shared_model()
+
+    coqui_model_changed = False
+    if coqui_config:
+        current_coqui = app_config.tts.coqui_xtts_v2
+        for field_name in ("model_dir", "speaker_wav_path", "language", "device", "speed"):
+            if field_name not in coqui_config:
+                continue
+            new_value = float(coqui_config[field_name]) if field_name == "speed" else str(coqui_config[field_name])
+            if getattr(current_coqui, field_name) != new_value:
+                setattr(current_coqui, field_name, new_value)
+                if field_name in {"model_dir", "device"}:
+                    coqui_model_changed = True
+        opt.TTS_MODEL_DIR = resolve_project_path(app_config, current_coqui.model_dir)
+        opt.TTS_SPEAKER_WAV_PATH = resolve_project_path(app_config, current_coqui.speaker_wav_path)
+        opt.TTS_LANGUAGE = current_coqui.language
+        opt.TTS_DEVICE = current_coqui.device
+        opt.TTS_SPEED = current_coqui.speed
+        opt.REF_FILE = resolve_project_path(app_config, current_coqui.speaker_wav_path)
+        if coqui_model_changed:
+            CoquiXTTSV2TTS.reset_shared_model()
+
+    if pyttsx3_config:
+        current_pyttsx3 = app_config.tts.pyttsx3
+        for field_name in ("voice_id", "driver_name"):
+            if field_name not in pyttsx3_config:
+                continue
+            new_value = str(pyttsx3_config[field_name])
+            setattr(current_pyttsx3, field_name, new_value)
+        for field_name in ("rate",):
+            if field_name not in pyttsx3_config:
+                continue
+            new_value = int(pyttsx3_config[field_name])
+            setattr(current_pyttsx3, field_name, new_value)
+        for field_name in ("volume",):
+            if field_name not in pyttsx3_config:
+                continue
+            new_value = float(pyttsx3_config[field_name])
+            setattr(current_pyttsx3, field_name, new_value)
+        opt.TTS_PYTTSX3_DRIVER_NAME = current_pyttsx3.driver_name
+        opt.TTS_PYTTSX3_VOICE_ID = current_pyttsx3.voice_id
+        opt.TTS_PYTTSX3_RATE = current_pyttsx3.rate
+        opt.TTS_PYTTSX3_VOLUME = current_pyttsx3.volume
 
     if edge_config:
         if "voice_name" in edge_config:
@@ -1231,6 +1660,15 @@ def apply_runtime_settings(payload: dict) -> None:
 
     apply_config_to_opt(opt, app_config)
 
+    # Keep pyttsx3 startup on the system default voice, but honor any
+    # voice_id the user explicitly selected in the current runtime save.
+    if selected_tts == "pyttsx3":
+        opt.REF_FILE = app_config.tts.pyttsx3.voice_id
+        opt.TTS_PYTTSX3_VOICE_ID = app_config.tts.pyttsx3.voice_id
+        opt.TTS_PYTTSX3_DRIVER_NAME = app_config.tts.pyttsx3.driver_name
+        opt.TTS_PYTTSX3_RATE = app_config.tts.pyttsx3.rate
+        opt.TTS_PYTTSX3_VOLUME = app_config.tts.pyttsx3.volume
+
     if tts_engine_changed:
         for nerfreal in list(nerfreals.values()):
             if nerfreal is None or not hasattr(nerfreal, "reload_tts"):
@@ -1240,6 +1678,18 @@ def apply_runtime_settings(payload: dict) -> None:
         for nerfreal in list(nerfreals.values()):
             if nerfreal is None or not hasattr(nerfreal, "tts"):
                 continue
+            if hasattr(nerfreal.tts, "speaker_wav_path"):
+                if coqui_model_changed:
+                    nerfreal.reload_tts()
+                    continue
+                nerfreal.tts.speaker_wav_path = Path(getattr(opt, "TTS_SPEAKER_WAV_PATH", ""))
+            if hasattr(nerfreal.tts, "device"):
+                nerfreal.tts.device = getattr(opt, "TTS_DEVICE", "cuda:0")
+            if hasattr(nerfreal.tts, "language"):
+                if hasattr(nerfreal.tts, "speaker_wav_path"):
+                    nerfreal.tts.language = getattr(opt, "TTS_LANGUAGE", "zh-cn")
+                else:
+                    nerfreal.tts.language = getattr(opt, "TTS_QWEN_LANGUAGE", "Auto")
             if hasattr(nerfreal.tts, "speaker_id"):
                 nerfreal.tts.speaker_id = getattr(opt, "TTS_SPEAKER_ID", 0)
             if hasattr(nerfreal.tts, "speed"):
@@ -1248,6 +1698,22 @@ def apply_runtime_settings(payload: dict) -> None:
                 nerfreal.tts.num_threads = getattr(opt, "TTS_NUM_THREADS", 1)
             if hasattr(nerfreal.tts, "provider"):
                 nerfreal.tts.provider = getattr(opt, "TTS_PROVIDER", "")
+            if hasattr(nerfreal.tts, "speaker"):
+                nerfreal.tts.speaker = getattr(opt, "TTS_QWEN_SPEAKER", "Vivian")
+            if hasattr(nerfreal.tts, "instruct"):
+                nerfreal.tts.instruct = getattr(opt, "TTS_QWEN_INSTRUCT", "")
+            if hasattr(nerfreal.tts, "language") and not hasattr(nerfreal.tts, "speaker_wav_path"):
+                nerfreal.tts.language = getattr(opt, "TTS_QWEN_LANGUAGE", "Auto")
+            if hasattr(nerfreal.tts, "speed") and not hasattr(nerfreal.tts, "speaker_wav_path"):
+                nerfreal.tts.speed = getattr(opt, "TTS_QWEN_SPEED", 1.0)
+            if hasattr(nerfreal.tts, "voice_id"):
+                nerfreal.tts.voice_id = getattr(opt, "TTS_PYTTSX3_VOICE_ID", "")
+            if hasattr(nerfreal.tts, "rate"):
+                nerfreal.tts.rate = getattr(opt, "TTS_PYTTSX3_RATE", 175)
+            if hasattr(nerfreal.tts, "volume"):
+                nerfreal.tts.volume = getattr(opt, "TTS_PYTTSX3_VOLUME", 1.0)
+            if hasattr(nerfreal.tts, "driver_name"):
+                nerfreal.tts.driver_name = getattr(opt, "TTS_PYTTSX3_DRIVER_NAME", "")
             if hasattr(nerfreal.tts, "_tts") and nerfreal.tts._tts is None:
                 continue
             if hasattr(nerfreal.tts, "_tts"):
@@ -1462,7 +1928,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--H", type=int, default=450, help="GUI height")
     parser.add_argument("--avatar_id", type=str, default=None, help="avatar id in data/avatars")
     parser.add_argument("--batch_size", type=int, default=16, help="infer batch")
-    parser.add_argument("--tts", type=str, default="", help="TTS 引擎：vits_zh / vits_melo_zh_en / edgetts；留空时使用配置文件")
+    parser.add_argument("--tts", type=str, default="", help="TTS 引擎：pyttsx3 / edgetts / vits_zh / vits_melo_zh_en / qwen3_customvoice / coqui_xtts_v2；留空时使用配置文件")
     parser.add_argument("--model", type=str, default="wav2lip", help="only wav2lip is supported")
     parser.add_argument("--listenport", type=int, default=8010, help="web listen port")
     return parser
@@ -1474,7 +1940,7 @@ def validate_supported_modes(args) -> None:
     if getattr(args, "tts", ""):
         tts_engine = normalize_tts_engine(args.tts)
         if tts_engine not in SUPPORTED_TTS_ENGINES:
-            raise ValueError("This build only supports --tts vits_zh / vits_melo_zh_en / edgetts")
+            raise ValueError("This build only supports --tts pyttsx3 / edgetts / vits_zh / vits_melo_zh_en / qwen3_customvoice / coqui_xtts_v2")
         args.tts = tts_engine
     args.transport = "webrtc"
 
@@ -1488,6 +1954,9 @@ def bootstrap_runtime(args):
     if not getattr(args, "tts", ""):
         args.tts = app_config.providers.tts
     validate_supported_modes(args)
+    resolved_tts = resolve_available_tts_engine(args.tts)
+    args.tts = resolved_tts
+    app_config.providers.tts = resolved_tts
     opt = apply_config_to_opt(args, app_config)
     opt.transport = "webrtc"
     opt.customopt = []
@@ -1528,6 +1997,10 @@ def create_web_app() -> web.Application:
     appasync.router.add_post("/human", human)
     appasync.router.add_post("/humanaudio", humanaudio)
     appasync.router.add_post("/api/asr/transcribe", transcribe_audio)
+    appasync.router.add_get("/api/tts/coqui/reference-wavs", get_coqui_reference_wavs)
+    appasync.router.add_post("/api/tts/coqui/reference-wav", upload_coqui_reference_wav)
+    appasync.router.add_post("/api/tts/coqui/reference-wav/select", select_coqui_reference_wav)
+    appasync.router.add_post("/api/tts/coqui/reference-wav/delete", delete_coqui_reference_wav)
     appasync.router.add_post("/api/dialog/add", add_dialog_entry)
     appasync.router.add_get("/api/dialog/history", get_dialog_history)
     appasync.router.add_post("/api/dialog/clear", clear_dialog_history)

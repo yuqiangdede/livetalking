@@ -3,7 +3,9 @@ param(
     [string]$StageDir = "",
     [string]$ZipPath = "",
     [string]$LogPath = "",
-    [switch]$SkipZip = $true
+    [switch]$SkipZip = $true,
+    [switch]$IncludeQwenTts,
+    [switch]$IncludeCoquiTts
 )
 
 $ErrorActionPreference = "Stop"
@@ -60,7 +62,8 @@ function Format-Size {
 function Copy-DirectoryContent {
     param(
         [string]$Source,
-        [string]$Target
+        [string]$Target,
+        [string[]]$ExcludeDirectories = @()
     )
 
     if (-not (Test-Path -Path $Source -PathType Container)) {
@@ -82,6 +85,11 @@ function Copy-DirectoryContent {
         "/XD",
         "__pycache__"
     )
+    foreach ($excludeDirectory in $ExcludeDirectories) {
+        if (-not [string]::IsNullOrWhiteSpace($excludeDirectory)) {
+            $arguments += $excludeDirectory
+        }
+    }
     & robocopy @arguments | Out-Null
     $exitCode = $LASTEXITCODE
     if ($exitCode -ge 8) {
@@ -165,6 +173,16 @@ function Get-DefaultAvatarId {
     $match = Select-String -Path $ConfigPath -Pattern '^\s*avatar_id:\s*["'']?([^"'']+)["'']?\s*$' -ErrorAction Stop | Select-Object -First 1
     if ($null -eq $match) {
         throw "Portable package check failed: could not find avatar_id in $ConfigPath"
+    }
+    return $match.Matches[0].Groups[1].Value.Trim()
+}
+
+function Get-ConfiguredTtsEngine {
+    param([string]$ConfigPath)
+
+    $match = Select-String -Path $ConfigPath -Pattern '^\s*tts:\s*["'']?([^"'']+)["'']?\s*$' -ErrorAction Stop | Select-Object -First 1
+    if ($null -eq $match) {
+        throw "Portable package check failed: could not find providers.tts in $ConfigPath"
     }
     return $match.Matches[0].Groups[1].Value.Trim()
 }
@@ -303,6 +321,8 @@ $topLevelFiles = @(
     "pyproject.toml",
     "requirements.txt",
     "requirements-torch-cu128.txt",
+    "requirements-qwen-tts.txt",
+    "requirements-coqui-tts.txt",
     "start.ps1",
     "start.bat",
     "start_nvidia_gpu.bat"
@@ -330,7 +350,17 @@ foreach ($file in $topLevelFiles) {
 Start-BuildStep -Message "Copy project directories"
 foreach ($dir in $topLevelDirs) {
     Write-BuildLog -Message "Copy directory: $dir"
-    Copy-DirectoryContent -Source (Join-Path $ProjectRoot $dir) -Target (Join-Path $StageDir $dir)
+    $excludeDirectories = @()
+    if ($dir -eq "models" -and -not $IncludeQwenTts) {
+        $excludeDirectories += (Join-Path $ProjectRoot "models\tts\qwen")
+    }
+    if ($dir -eq "models" -and -not $IncludeCoquiTts) {
+        $excludeDirectories += (Join-Path $ProjectRoot "models\tts\coqui")
+    }
+    if ($dir -eq "data" -and -not $IncludeCoquiTts) {
+        $excludeDirectories += (Join-Path $ProjectRoot "data\tts\coqui_xtts_v2")
+    }
+    Copy-DirectoryContent -Source (Join-Path $ProjectRoot $dir) -Target (Join-Path $StageDir $dir) -ExcludeDirectories $excludeDirectories
 }
 
 Start-BuildStep -Message "Reset runtime directories and clean junk files"
@@ -342,6 +372,58 @@ Remove-JunkArtifacts -Root $StageDir
 Start-BuildStep -Message "Resolve default avatar from config"
 $defaultAvatarId = Get-DefaultAvatarId -ConfigPath (Join-Path $ProjectRoot "configs\app.yaml")
 Write-BuildLog -Message "Default avatar: $defaultAvatarId"
+$configuredTtsEngine = Get-ConfiguredTtsEngine -ConfigPath (Join-Path $ProjectRoot "configs\app.yaml")
+$qwenPackageRequested = $IncludeQwenTts.IsPresent
+$coquiPackageRequested = $IncludeCoquiTts.IsPresent
+$qwenModelStageDir = Join-Path $StageDir "models\tts\qwen\Qwen3-TTS-12Hz-0.6B-CustomVoice"
+$qwenTokenizerStageDir = Join-Path $StageDir "models\tts\qwen\Qwen3-TTS-Tokenizer-12Hz"
+$coquiModelStageDir = Join-Path $StageDir "models\tts\coqui\xtts_v2"
+$coquiReferenceStagePath = Join-Path $StageDir "data\tts\coqui_xtts_v2\reference.wav"
+if ($qwenPackageRequested) {
+    $qwenAvailable = (Test-Path -Path $qwenModelStageDir -PathType Container) -and (Test-Path -Path $qwenTokenizerStageDir -PathType Container)
+    if ($qwenAvailable) {
+        Write-BuildLog -Message "Qwen TTS assets detected and will be included in the portable package."
+    } else {
+        Write-BuildLog -Message "Qwen TTS requested, but model/tokenizer directories are missing from the project."
+        throw "Portable package build failed: Qwen TTS was requested, but Qwen model/tokenizer assets are missing."
+    }
+} else {
+    $qwenAvailable = $false
+    Write-BuildLog -Message "Qwen TTS excluded by default from the portable package."
+}
+
+if ($coquiPackageRequested) {
+    $coquiModelAvailable = Test-Path -Path $coquiModelStageDir -PathType Container
+    $coquiReferenceAvailable = Test-Path -Path $coquiReferenceStagePath -PathType Leaf
+    if ($coquiModelAvailable) {
+        Write-BuildLog -Message "Coqui XTTS v2 model directory detected."
+    } else {
+        Write-BuildLog -Message "Coqui XTTS v2 requested, but the model directory is missing from the project."
+    }
+    if ($coquiReferenceAvailable) {
+        Write-BuildLog -Message "Coqui XTTS v2 reference wav detected."
+    } else {
+        Write-BuildLog -Message "Coqui XTTS v2 requested, but the reference wav is missing from the project."
+        throw "Portable package build failed: Coqui XTTS v2 was requested, but the model or reference wav is missing."
+    }
+} else {
+    $coquiModelAvailable = $false
+    $coquiReferenceAvailable = $false
+    Write-BuildLog -Message "Coqui XTTS v2 excluded by default from the portable package."
+}
+
+if ($configuredTtsEngine -eq "qwen3_customvoice" -and -not $qwenPackageRequested) {
+    throw "Portable package build failed: providers.tts is qwen3_customvoice, but Qwen TTS is excluded by default. Re-run with -IncludeQwenTts."
+}
+if ($configuredTtsEngine -eq "coqui_xtts_v2" -and -not $coquiPackageRequested) {
+    throw "Portable package build failed: providers.tts is coqui_xtts_v2, but Coqui XTTS v2 is excluded by default. Re-run with -IncludeCoquiTts."
+}
+if ($configuredTtsEngine -eq "qwen3_customvoice" -and (-not $qwenAvailable)) {
+    throw "Portable package build failed: providers.tts is qwen3_customvoice, but Qwen TTS assets are missing."
+}
+if ($configuredTtsEngine -eq "coqui_xtts_v2" -and (-not $coquiModelAvailable -or -not $coquiReferenceAvailable)) {
+    throw "Portable package build failed: providers.tts is coqui_xtts_v2, but Coqui XTTS v2 model or reference wav is missing."
+}
 
 $requiredChecks = @(
     "app.py",
@@ -388,6 +470,32 @@ $requiredFiles = @(
     @{ Path = "models\tts\vits-melo-tts-zh_en\tokens.txt"; Label = "zh/en TTS tokens.txt" },
     @{ Path = "data\avatars\$defaultAvatarId\coords.pkl"; Label = "Default avatar coords.pkl" }
 )
+
+if ($qwenAvailable) {
+    $requiredDirectories += @(
+        @{ Path = "models\tts\qwen\Qwen3-TTS-12Hz-0.6B-CustomVoice"; Label = "Qwen TTS model directory" },
+        @{ Path = "models\tts\qwen\Qwen3-TTS-Tokenizer-12Hz"; Label = "Qwen TTS tokenizer directory" }
+    )
+    $requiredFiles += @(
+        @{ Path = "models\tts\qwen\Qwen3-TTS-12Hz-0.6B-CustomVoice\config.json"; Label = "Qwen TTS config.json" },
+        @{ Path = "models\tts\qwen\Qwen3-TTS-Tokenizer-12Hz\config.json"; Label = "Qwen tokenizer config.json" }
+    )
+}
+
+if ($coquiModelAvailable) {
+    $requiredDirectories += @(
+        @{ Path = "models\tts\coqui\xtts_v2"; Label = "Coqui XTTS v2 model directory" }
+    )
+    $requiredFiles += @(
+        @{ Path = "models\tts\coqui\xtts_v2\config.json"; Label = "Coqui XTTS v2 config.json" }
+    )
+}
+
+if ($coquiReferenceAvailable) {
+    $requiredFiles += @(
+        @{ Path = "data\tts\coqui_xtts_v2\reference.wav"; Label = "Coqui XTTS v2 reference wav" }
+    )
+}
 
 Start-BuildStep -Message "Validate bundled runtime and assets"
 foreach ($item in $requiredChecks) {
