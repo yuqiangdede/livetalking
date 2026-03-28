@@ -40,6 +40,9 @@ import av
 from fractions import Fraction
 from threading import Lock
 
+from ..providers.qwen_tts import QwenCustomVoiceTTS
+from ..providers.coqui_xtts_tts import CoquiXTTSV2TTS
+from ..providers.pyttsx3_tts import Pyttsx3TTS
 from ..providers.sherpa_tts import SherpaOnnxVitsTTS
 from ..providers.tts_engines import EdgeTTS
 from ..utils.app_logger import logger
@@ -94,8 +97,14 @@ class BaseReal:
     def build_tts(self):
         if self.opt.tts in {"vits_zh", "sherpa_onnx_vits", "sherpa-onnx-vits", "vits_melo_zh_en", "sherpa_onnx_vits_zh_en", "vits_melo_tts_zh_en"}:
             return SherpaOnnxVitsTTS(self.opt, self)
+        if self.opt.tts == "qwen3_customvoice":
+            return QwenCustomVoiceTTS(self.opt, self)
+        if self.opt.tts == "coqui_xtts_v2":
+            return CoquiXTTSV2TTS(self.opt, self)
         if self.opt.tts == "edgetts":
             return EdgeTTS(self.opt, self)
+        if self.opt.tts == "pyttsx3":
+            return Pyttsx3TTS(self.opt, self)
         raise ValueError(f"Unsupported TTS provider: {self.opt.tts}")
 
     def reload_tts(self):

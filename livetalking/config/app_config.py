@@ -58,6 +58,54 @@ def ensure_directory(config: "AppConfig", path_value: str) -> str:
     return str(path)
 
 
+def resolve_coqui_reference_audio_path(config: "AppConfig", path_value: str) -> tuple[str, str]:
+    configured_rel = str(path_value or "").strip().replace("\\", "/")
+    configured_abs = Path(resolve_project_path(config, configured_rel)) if configured_rel else None
+    candidates: list[tuple[str, Path]] = []
+
+    def add_candidate(rel_value: str) -> None:
+        rel_norm = str(rel_value or "").strip().replace("\\", "/")
+        if not rel_norm:
+            return
+        abs_path = Path(resolve_project_path(config, rel_norm))
+        candidates.append((rel_norm, abs_path))
+
+    if configured_rel:
+        add_candidate(configured_rel)
+        configured_path = Path(configured_rel)
+        if configured_path.suffix.lower() == ".wav":
+            add_candidate(configured_path.with_suffix(".mp3").as_posix())
+        elif configured_path.suffix.lower() == ".mp3":
+            add_candidate(configured_path.with_suffix(".wav").as_posix())
+
+    add_candidate("data/tts/coqui_xtts_v2/reference.wav")
+    add_candidate("data/tts/coqui_xtts_v2/reference.mp3")
+
+    seen: set[str] = set()
+    for rel_norm, abs_path in candidates:
+        key = f"{rel_norm}|{abs_path}"
+        if key in seen:
+            continue
+        seen.add(key)
+        if abs_path.is_file():
+            return rel_norm, str(abs_path)
+
+    reference_root = Path(resolve_project_path(config, "data/tts/coqui_xtts_v2"))
+    if reference_root.is_dir():
+        files = [
+            path for path in reference_root.rglob("*")
+            if path.is_file() and path.suffix.lower() in {".wav", ".mp3"}
+        ]
+        if files:
+            selected = sorted(files, key=lambda item: str(item.relative_to(reference_root)).lower())[0]
+            rel_norm = selected.resolve().relative_to(config.project_root.resolve()).as_posix()
+            return rel_norm, str(selected.resolve())
+
+    fallback_rel = configured_rel or "data/tts/coqui_xtts_v2/reference.wav"
+    fallback_abs = str(configured_abs or Path(resolve_project_path(config, fallback_rel)))
+    return fallback_rel, fallback_abs
+
+
 def get_settings_db_path(project_root: str | Path) -> Path:
     return Path(project_root).resolve() / SETTINGS_DB_RELATIVE_PATH
 
@@ -77,7 +125,10 @@ def _build_app_config_from_payload(payload: dict[str, Any], project_root: Path) 
         tts=TTSConfig(
             vits_zh=TTSSherpaOnnxVitsConfig(**tts_payload["vits_zh"]),
             vits_melo_zh_en=TTSSherpaOnnxVitsZhEnConfig(**tts_payload["vits_melo_zh_en"]),
+            qwen3_customvoice=TTSQwenCustomVoiceConfig(**tts_payload["qwen3_customvoice"]),
+            coqui_xtts_v2=TTSCoquiXTTSV2Config(**tts_payload["coqui_xtts_v2"]),
             edgetts=TTSEdgeTTSConfig(**tts_payload["edgetts"]),
+            pyttsx3=TTSPyttsx3Config(**tts_payload["pyttsx3"]),
         ),
         avatar=AvatarConfig(wav2lip=AvatarWav2LipConfig(**payload["avatar"]["wav2lip"])),
         llm=LLMConfig(
@@ -194,7 +245,7 @@ class ASRConfig:
 @dataclass
 class TTSSherpaOnnxVitsConfig:
     model_dir: str = "models/tts/sherpa-onnx-vits-zh-ll"
-    provider: str = "cpu"
+    provider: str = "cuda"
     num_threads: int = 2
     speaker_id: int = 4
     speed: float = 1.0
@@ -204,7 +255,7 @@ class TTSSherpaOnnxVitsConfig:
 @dataclass
 class TTSSherpaOnnxVitsZhEnConfig:
     model_dir: str = "models/tts/vits-melo-tts-zh_en"
-    provider: str = "cpu"
+    provider: str = "cuda"
     num_threads: int = 2
     speaker_id: int = 1
     speed: float = 1.0
@@ -218,10 +269,43 @@ class TTSEdgeTTSConfig:
 
 
 @dataclass
+class TTSPyttsx3Config:
+    voice_id: str = ""
+    rate: int = 175
+    volume: float = 1.0
+    driver_name: str = ""
+
+
+@dataclass
+class TTSQwenCustomVoiceConfig:
+    model_dir: str = "models/tts/qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"
+    tokenizer_dir: str = "models/tts/qwen/Qwen3-TTS-Tokenizer-12Hz"
+    device: str = "cuda:0"
+    dtype: str = "bfloat16"
+    attn_implementation: str = "eager"
+    speaker: str = "Vivian"
+    instruct: str = ""
+    language: str = "Auto"
+    speed: float = 1.0
+
+
+@dataclass
+class TTSCoquiXTTSV2Config:
+    model_dir: str = "models/tts/coqui/xtts_v2"
+    speaker_wav_path: str = "data/tts/coqui_xtts_v2/reference.wav"
+    language: str = "zh-cn"
+    device: str = "cuda:0"
+    speed: float = 1.1
+
+
+@dataclass
 class TTSConfig:
     vits_zh: TTSSherpaOnnxVitsConfig = field(default_factory=TTSSherpaOnnxVitsConfig)
     vits_melo_zh_en: TTSSherpaOnnxVitsZhEnConfig = field(default_factory=TTSSherpaOnnxVitsZhEnConfig)
+    qwen3_customvoice: TTSQwenCustomVoiceConfig = field(default_factory=TTSQwenCustomVoiceConfig)
+    coqui_xtts_v2: TTSCoquiXTTSV2Config = field(default_factory=TTSCoquiXTTSV2Config)
     edgetts: TTSEdgeTTSConfig = field(default_factory=TTSEdgeTTSConfig)
+    pyttsx3: TTSPyttsx3Config = field(default_factory=TTSPyttsx3Config)
 
 
 @dataclass
@@ -295,8 +379,14 @@ def normalize_tts_engine(value: str) -> str:
         return "vits_zh"
     if engine in {"sherpa_onnx_vits_zh_en", "vits_melo_tts_zh_en", "sherpa_onnx_melo_tts_zh_en", "vits_melo_zh_en"}:
         return "vits_melo_zh_en"
+    if engine in {"qwen3_tts", "qwen3_customvoice", "qwen3_tts_customvoice", "qwen_customvoice"}:
+        return "qwen3_customvoice"
+    if engine in {"coqui_tts", "coqui_xtts_v2", "xtts", "xtts_v2"}:
+        return "coqui_xtts_v2"
     if engine == "edgetts":
         return "edgetts"
+    if engine in {"pyttsx3", "pyttsx3_tts", "pyttsx3_sapi5", "sapi5"}:
+        return "pyttsx3"
     return engine
 
 
@@ -403,6 +493,57 @@ def apply_config_to_opt(opt, config: AppConfig):
         opt.TTS_SPEAKER_ID = 0
         opt.TTS_SPEED = config.tts.edgetts.speed
         opt.TTS_RULE_FSTS = []
+    elif opt.tts == "qwen3_customvoice":
+        qwen_config = config.tts.qwen3_customvoice
+        opt.REF_FILE = resolve_project_path(config, qwen_config.model_dir)
+        opt.REF_TEXT = qwen_config.instruct or None
+        opt.TTS_SERVER = ""
+        opt.TTS_MODEL_DIR = resolve_project_path(config, qwen_config.model_dir)
+        opt.TTS_TOKENIZER_DIR = resolve_project_path(config, qwen_config.tokenizer_dir)
+        opt.TTS_DEVICE = qwen_config.device
+        opt.TTS_DTYPE = qwen_config.dtype
+        opt.TTS_ATTN_IMPLEMENTATION = qwen_config.attn_implementation
+        opt.TTS_QWEN_SPEAKER = qwen_config.speaker
+        opt.TTS_QWEN_INSTRUCT = qwen_config.instruct
+        opt.TTS_QWEN_LANGUAGE = qwen_config.language
+        opt.TTS_QWEN_SPEED = qwen_config.speed
+        opt.TTS_PROVIDER = ""
+        opt.TTS_NUM_THREADS = 1
+        opt.TTS_SPEAKER_ID = 0
+        opt.TTS_SPEED = 1.0
+        opt.TTS_RULE_FSTS = []
+    elif opt.tts == "coqui_xtts_v2":
+        coqui_config = config.tts.coqui_xtts_v2
+        resolved_rel, resolved_abs = resolve_coqui_reference_audio_path(config, coqui_config.speaker_wav_path)
+        coqui_config.speaker_wav_path = resolved_rel
+        opt.REF_FILE = resolved_abs
+        opt.REF_TEXT = None
+        opt.TTS_SERVER = ""
+        opt.TTS_MODEL_DIR = resolve_project_path(config, coqui_config.model_dir)
+        opt.TTS_SPEAKER_WAV_PATH = resolved_abs
+        opt.TTS_LANGUAGE = coqui_config.language
+        opt.TTS_DEVICE = coqui_config.device
+        opt.TTS_PROVIDER = ""
+        opt.TTS_NUM_THREADS = 1
+        opt.TTS_SPEAKER_ID = 0
+        opt.TTS_SPEED = coqui_config.speed
+        opt.TTS_RULE_FSTS = []
+    elif opt.tts == "pyttsx3":
+        pyttsx3_config = config.tts.pyttsx3
+        opt.REF_FILE = ""
+        opt.REF_TEXT = None
+        opt.TTS_SERVER = ""
+        opt.TTS_MODEL_DIR = ""
+        opt.TTS_TOKENIZER_DIR = ""
+        opt.TTS_PROVIDER = ""
+        opt.TTS_NUM_THREADS = 1
+        opt.TTS_SPEAKER_ID = 0
+        opt.TTS_SPEED = 1.0
+        opt.TTS_RULE_FSTS = []
+        opt.TTS_PYTTSX3_DRIVER_NAME = pyttsx3_config.driver_name
+        opt.TTS_PYTTSX3_VOICE_ID = ""
+        opt.TTS_PYTTSX3_RATE = pyttsx3_config.rate
+        opt.TTS_PYTTSX3_VOLUME = pyttsx3_config.volume
     else:
         raise ValueError(f"Unsupported TTS provider: {opt.tts}")
     opt.CONFIG_PATH = str(Path(getattr(opt, "config", "configs/app.yaml")).resolve())

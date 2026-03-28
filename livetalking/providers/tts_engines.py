@@ -14,6 +14,7 @@ import resampy
 import soundfile as sf
 
 from ..utils.app_logger import logger
+from .tts_segments import split_tts_segments
 
 if TYPE_CHECKING:
     from ..core.base_real import BaseReal
@@ -79,36 +80,62 @@ class EdgeTTS(BaseTTS):
     def txt_to_audio(self, msg: tuple[str, dict]) -> None:
         voicename = self.opt.REF_FILE
         text, textevent = msg
-        start = time.perf_counter()
-        asyncio.new_event_loop().run_until_complete(self._stream_edge_tts(voicename, text))
-        logger.info("EdgeTTS synth done in %.4fs", time.perf_counter() - start)
-        if self.input_stream.getbuffer().nbytes <= 0:
-            logger.error("EdgeTTS returned empty audio")
+        text = (text or "").strip()
+        if not text:
             return
-
-        self.input_stream.seek(0)
-        stream = self._create_bytes_stream(self.input_stream)
-        streamlen = stream.shape[0]
-        idx = 0
+        segments = split_tts_segments(text)
+        if not segments:
+            return
+        start = time.perf_counter()
         queued_chunks = 0
         queued_samples = 0
-        while streamlen >= self.chunk and self.state == State.RUNNING:
-            eventpoint = {}
-            streamlen -= self.chunk
-            if idx == 0:
-                eventpoint = {"status": "start", "text": text}
-                eventpoint.update(**textevent)
-            elif streamlen < self.chunk:
-                eventpoint = {"status": "end", "text": text}
-                eventpoint.update(**textevent)
-            self.parent.put_audio_frame(stream[idx:idx + self.chunk], eventpoint)
-            queued_chunks += 1
-            queued_samples += self.chunk
-            idx += self.chunk
+        first_chunk_elapsed = None
+        total_audio_samples = 0
+        textevent = dict(textevent or {})
+
+        for segment_index, segment_text in enumerate(segments, start=1):
+            self.input_stream.seek(0)
+            self.input_stream.truncate()
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(self._stream_edge_tts(voicename, segment_text))
+            finally:
+                loop.close()
+            if self.input_stream.getbuffer().nbytes <= 0:
+                logger.warning("EdgeTTS returned empty audio for segment=%s text=%s", segment_index, segment_text)
+                continue
+
+            self.input_stream.seek(0)
+            stream = self._create_bytes_stream(self.input_stream)
+            if stream.size == 0:
+                continue
+            total_audio_samples += int(stream.shape[0])
+            streamlen = stream.shape[0]
+            idx = 0
+            while streamlen >= self.chunk and self.state == State.RUNNING:
+                eventpoint = {}
+                streamlen -= self.chunk
+                if queued_chunks == 0:
+                    eventpoint = {"status": "start", "text": text}
+                    eventpoint.update(**textevent)
+                elif segment_index == len(segments) and streamlen < self.chunk:
+                    eventpoint = {"status": "end", "text": text}
+                    eventpoint.update(**textevent)
+                self.parent.put_audio_frame(stream[idx:idx + self.chunk], eventpoint)
+                if first_chunk_elapsed is None:
+                    first_chunk_elapsed = time.perf_counter() - start
+                queued_chunks += 1
+                queued_samples += self.chunk
+                idx += self.chunk
+        total_elapsed = time.perf_counter() - start
+        textevent.setdefault("tts_elapsed", total_elapsed)
+        textevent.setdefault("tts_duration", float(total_audio_samples) / float(self.sample_rate))
         logger.info(
-            "EdgeTTS audio queued chunks=%s queued_samples=%s text_len=%s",
+            "EdgeTTS audio queued chunks=%s queued_samples=%s segments=%s first_chunk=%.3fs text_len=%s",
             queued_chunks,
             queued_samples,
+            len(segments),
+            float(first_chunk_elapsed or total_elapsed),
             len(text),
         )
         self.input_stream.seek(0)

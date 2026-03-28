@@ -15,9 +15,11 @@ aiortc
 av==12.3.0
 
 edge_tts
+pyttsx3
 funasr==1.0.23
 modelscope==1.8.1
-onnxruntime>=1.18.0
-sherpa-onnx==1.12.19
+onnxruntime-gpu>=1.18.0
+-f https://k2-fsa.github.io/sherpa/onnx/cuda.html
+sherpa-onnx==1.12.19+cuda12.cudnn9
 
 setuptools<81

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import Future, ThreadPoolExecutor
 import re
 import threading
 import time
@@ -11,6 +12,7 @@ import resampy
 
 from ..utils.app_logger import logger
 from .tts_engines import BaseTTS, State
+from .tts_segments import split_tts_segments
 
 try:
     import sherpa_onnx
@@ -62,6 +64,9 @@ def _sanitize_tts_text(text: str) -> str:
             cleaned.append(char)
             continue
         if "\u4e00" <= char <= "\u9fff" or "\u3400" <= char <= "\u4dbf":
+            cleaned.append(char)
+            continue
+        if unicodedata.category(char).startswith("P"):
             cleaned.append(char)
             continue
     return re.sub(r"\s+", " ", "".join(cleaned)).strip()
@@ -178,56 +183,84 @@ class SherpaOnnxVitsTTS(BaseTTS):
 
     def txt_to_audio(self, msg: tuple[str, dict]):
         text, textevent = msg
-        text = _sanitize_tts_text(text)
+        text = (text or "").strip()
         if not text:
             return
 
-        total_start = time.perf_counter()
-        stream, sample_rate = self._synthesize(text)
-        if stream.size == 0:
-            logger.warning("Sherpa-ONNX TTS returned empty audio for text=%s", text)
+        segments = split_tts_segments(text)
+        if not segments:
+            return
+        sanitized_segments = [_sanitize_tts_text(segment) for segment in segments]
+        sanitized_segments = [segment for segment in sanitized_segments if segment]
+        if not sanitized_segments:
             return
 
-        if sample_rate != self.sample_rate:
-            stream = resampy.resample(x=stream, sr_orig=sample_rate, sr_new=self.sample_rate)
-            logger.info(
-                "Sherpa TTS resampled to %s Hz, samples=%s, duration=%.3fs",
-                self.sample_rate,
-                len(stream),
-                float(len(stream)) / float(self.sample_rate),
-            )
-
-        total_elapsed = time.perf_counter() - total_start
+        total_start = time.perf_counter()
         textevent = dict(textevent or {})
-        textevent.setdefault("tts_elapsed", total_elapsed)
-        textevent.setdefault("tts_duration", float(len(stream)) / float(self.sample_rate))
-
-        streamlen = stream.shape[0]
-        idx = 0
         queued_chunks = 0
         queued_samples = 0
-        while streamlen >= self.chunk and self.state == State.RUNNING:
-            eventpoint = {}
-            streamlen -= self.chunk
-            if idx == 0:
-                eventpoint = {"status": "start", "text": text}
-                eventpoint.update(**textevent)
-            elif streamlen < self.chunk:
-                eventpoint = {"status": "end", "text": text}
-                eventpoint.update(**textevent)
-            self.parent.put_audio_frame(stream[idx:idx + self.chunk], eventpoint)
-            queued_chunks += 1
-            queued_samples += self.chunk
-            idx += self.chunk
+        first_chunk_elapsed = None
+        total_audio_samples = 0
+
+        with ThreadPoolExecutor(max_workers=1, thread_name_prefix="sherpa_tts_prefetch") as executor:
+            future: Future[tuple[np.ndarray, int]] | None = executor.submit(self._synthesize, sanitized_segments[0])
+            next_segment_index = 1
+
+            for segment_index, _segment_text in enumerate(sanitized_segments, start=1):
+                if future is None:
+                    break
+                stream, sample_rate = future.result()
+                future = None
+
+                if next_segment_index < len(sanitized_segments) and self.state == State.RUNNING:
+                    future = executor.submit(self._synthesize, sanitized_segments[next_segment_index])
+                    next_segment_index += 1
+
+                if stream.size == 0:
+                    continue
+
+                if sample_rate != self.sample_rate:
+                    stream = resampy.resample(x=stream, sr_orig=sample_rate, sr_new=self.sample_rate)
+                    logger.info(
+                        "Sherpa TTS resampled to %s Hz, samples=%s, duration=%.3fs",
+                        self.sample_rate,
+                        len(stream),
+                        float(len(stream)) / float(self.sample_rate),
+                    )
+
+                total_audio_samples += int(stream.shape[0])
+                streamlen = stream.shape[0]
+                idx = 0
+                while streamlen >= self.chunk and self.state == State.RUNNING:
+                    eventpoint = {}
+                    streamlen -= self.chunk
+                    if queued_chunks == 0:
+                        eventpoint = {"status": "start", "text": text}
+                        eventpoint.update(**textevent)
+                    elif segment_index == len(sanitized_segments) and streamlen < self.chunk:
+                        eventpoint = {"status": "end", "text": text}
+                        eventpoint.update(**textevent)
+                    self.parent.put_audio_frame(stream[idx:idx + self.chunk], eventpoint)
+                    if first_chunk_elapsed is None:
+                        first_chunk_elapsed = time.perf_counter() - total_start
+                    queued_chunks += 1
+                    queued_samples += self.chunk
+                    idx += self.chunk
+
+        total_elapsed = time.perf_counter() - total_start
+        textevent.setdefault("tts_elapsed", total_elapsed)
+        textevent.setdefault("tts_duration", float(total_audio_samples) / float(self.sample_rate))
 
         logger.info(
-            "Sherpa TTS total elapsed %.3fs, audio_duration=%.3fs, text_len=%s, llm_elapsed=%s, queued_chunks=%s, queued_samples=%s",
+            "Sherpa TTS total elapsed %.3fs, first_chunk=%.3fs, audio_duration=%.3fs, text_len=%s, llm_elapsed=%s, queued_chunks=%s, queued_samples=%s, segments=%s",
             total_elapsed,
-            float(len(stream)) / float(self.sample_rate),
+            float(first_chunk_elapsed or total_elapsed),
+            float(total_audio_samples) / float(self.sample_rate),
             len(text),
             textevent.get("llm_elapsed"),
             queued_chunks,
             queued_samples,
+            len(segments),
         )
 
         dialog_id = str(textevent.get("dialog_id", ""))

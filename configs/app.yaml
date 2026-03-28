@@ -38,12 +38,33 @@ tts:
     speaker_id: 1
     speed: 1.0
     rule_fsts:
-    - phone.fst
-    - date.fst
-    - number.fst
+      - phone.fst
+      - date.fst
+      - number.fst
+  qwen3_customvoice:
+    model_dir: models/tts/qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice
+    tokenizer_dir: models/tts/qwen/Qwen3-TTS-Tokenizer-12Hz
+    device: cuda:0
+    dtype: bfloat16
+    attn_implementation: eager
+    speaker: Vivian
+    instruct: ''
+    language: Auto
+    speed: 1.0
+  coqui_xtts_v2:
+    model_dir: models/tts/coqui/xtts_v2
+    speaker_wav_path: data/tts/coqui_xtts_v2/reference.wav
+    language: zh-cn
+    device: cuda:0
+    speed: 1.1
   edgetts:
     voice_name: zh-CN-XiaoxiaoNeural
     speed: 0%
+  pyttsx3:
+    voice_id: ""
+    rate: 175
+    volume: 1.0
+    driver_name: ""
 avatar:
   wav2lip:
     model_dir: models/avatar/wav2lip256

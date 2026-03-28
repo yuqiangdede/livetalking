@@ -590,6 +590,10 @@
             box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.18);
         }
 
+        button.danger.recording:active {
+            background: #7f1d1d;
+        }
+
         button:disabled {
             opacity: 0.55;
             cursor: not-allowed;
@@ -890,10 +894,10 @@
                 <div class="right-hero">
                     <div class="right-hero-title">
                         <h1>数字人</h1>
-                        <div class="hero-status" id="connection-status" title="WebRTC connected. You can record, upload audio, or type text.">WebRTC connected. You can record, upload audio, or type text.</div>
+                        <div class="hero-status" id="connection-status" title="WebRTC 已连接，可录音、上传音频或输入文本。">WebRTC 已连接，可录音、上传音频或输入文本。</div>
                     </div>
                     <div class="right-hero-controls">
-                        <div class="badge hero-badge" id="connection-badge">Disconnected</div>
+                        <div class="badge hero-badge" id="connection-badge">未连接</div>
                         <div class="hero-session">Session <span id="session-text">0</span></div>
                         <label style="display:flex;align-items:center;gap:8px;margin:0;">
                             <input id="use-stun" type="checkbox"/>
@@ -952,16 +956,40 @@
         </div>
         <div class="modal-body">
             <div class="tabs">
-                <button class="tab-button active" type="button" data-tab="tts">TTS</button>
-                <button class="tab-button" type="button" data-tab="asr">ASR</button>
+                <button class="tab-button active" type="button" data-tab="asr">ASR</button>
+                <button class="tab-button" type="button" data-tab="tts">TTS</button>
                 <button class="tab-button" type="button" data-tab="avatars">avatars</button>
-                <button class="tab-button" type="button" data-tab="runtime">运行</button>
-                <button class="tab-button" type="button" data-tab="materials">素材管理</button>
                 <button class="tab-button" type="button" data-tab="llm">LLM</button>
+                <button class="tab-button" type="button" data-tab="materials">素材管理</button>
+                <button class="tab-button" type="button" data-tab="runtime">运行日志</button>
+            </div>
+
+            <div class="tab-panel active" data-panel="asr">
+                <div class="section-note" id="asr-model-note"></div>
+                <div class="grid-2" style="margin-top:12px;">
+                    <div>
+                        <label for="asr-device">ASR 设备</label>
+                        <input id="asr-device" type="text" value="cuda:0"/>
+                    </div>
+                    <div>
+                        <label for="asr-batch-size">ASR 批量时长 (秒)</label>
+                        <input id="asr-batch-size" type="number" min="1" step="1" value="300"/>
+                    </div>
+                </div>
+                <div class="section-note" style="margin-top:12px;">
+                    热词会传给 FunASR 热词接口，近音词会在识别结果后处理。支持空行和以 #、;、// 开头的注释行。
+                </div>
+                <div style="margin-top:12px;">
+                    <label for="asr-hotwords">热词配置</label>
+                    <textarea id="asr-hotwords" style="min-height:120px;" placeholder="每行一个热词或短语，例如：&#10;云台&#10;数字人&#10;监控"></textarea>
+                </div>
+                <div style="margin-top:12px;">
+                    <label for="asr-phonetic-replacements">近音词配置</label>
+                    <textarea id="asr-phonetic-replacements" style="min-height:120px;" placeholder="每行一个替换规则，例如：&#10;相继 => 相机&#10;运泰 => 云台"></textarea>
+                </div>
             </div>
 
             <div class="tab-panel active" data-panel="tts">
-                <div class="section-note" id="tts-model-note"></div>
                 <div class="grid-2" style="margin-top:12px;">
                     <div>
                         <label for="tts-engine">TTS 引擎</label>
@@ -996,6 +1024,68 @@
                 </div>
             </div>
 
+                <div id="tts-qwen-panel" style="display:none;margin-top:12px;">
+                    <div class="grid-3">
+                        <div>
+                            <label for="tts-qwen-speaker">Qwen 音色</label>
+                            <select id="tts-qwen-speaker">
+                                <option value="Vivian">Vivian</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="tts-qwen-instruct">风格词 / 情绪提示词</label>
+                            <input id="tts-qwen-instruct" type="text" value="" placeholder="例如：用温柔、轻快的语气说"/>
+                        </div>
+                        <div>
+                            <label for="tts-qwen-speed">Qwen 语速</label>
+                            <input id="tts-qwen-speed" type="number" min="0.5" max="2.0" step="0.1" value="1.0"/>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="tts-coqui-panel" style="display:none;margin-top:12px;">
+                    <div class="section-note" style="margin-bottom:10px;">Coqui XTTS v2 使用项目内参考音频做语音克隆。默认参考音频会固定保留，其他上传项支持选择、删除和新增，语速也可以单独调。</div>
+                    <div class="grid-2">
+                        <div>
+                            <label for="coqui-speaker-wav-select">参考音频</label>
+                            <select id="coqui-speaker-wav-select"></select>
+                        </div>
+                        <div>
+                            <label for="coqui-speaker-wav-path">当前参考音频路径</label>
+                            <input id="coqui-speaker-wav-path" type="text" readonly value=""/>
+                        </div>
+                    </div>
+                    <div class="grid-2" style="margin-top:12px;">
+                        <div>
+                            <label for="coqui-speaker-wav-file">上传参考音频（mp3）</label>
+                            <input id="coqui-speaker-wav-file" type="file" accept=".mp3,audio/mpeg"/>
+                        </div>
+                        <div>
+                            <label>参考音频管理</label>
+                            <div class="row-actions">
+                                <button id="coqui-select-reference" type="button">设为当前</button>
+                                <button id="coqui-delete-reference" type="button" class="danger">删除所选</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="grid-2" style="margin-top:12px;">
+                        <div>
+                            <label for="coqui-language">Coqui 语言</label>
+                            <select id="coqui-language">
+                                <option value="zh-cn">中文</option>
+                                <option value="en">英文</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="coqui-device">Coqui 设备</label>
+                            <input id="coqui-device" type="text" value="cuda:0" placeholder="cuda:0 / cpu"/>
+                        </div>
+                    </div>
+                    <div style="margin-top:12px;max-width:320px;">
+                        <label for="coqui-speed">Coqui 语速</label>
+                        <input id="coqui-speed" type="number" min="0.5" max="2.0" step="0.1" value="1.1"/>
+                    </div>
+                </div>
 
                 <div id="tts-edge-panel" style="display:none;margin-top:12px;">
                     <div class="grid-2">
@@ -1010,32 +1100,41 @@
                     </div>
                 </div>
 
+                <div id="tts-pyttsx3-panel" style="display:none;margin-top:12px;">
+                    <div class="section-note" style="margin-bottom:10px;">pyttsx3 使用本机系统语音引擎，先保存为 WAV 再进入现有播放流程。</div>
+                    <div class="grid-2">
+                        <div>
+                            <label for="pyttsx3-voice-id">pyttsx3 音色</label>
+                            <select id="pyttsx3-voice-id"></select>
+                        </div>
+                        <div>
+                            <label for="pyttsx3-driver-mode">pyttsx3 驱动模式</label>
+                            <select id="pyttsx3-driver-mode">
+                                <option value="">自动</option>
+                                <option value="sapi5">Windows SAPI5</option>
+                                <option value="nsss">macOS NSSS</option>
+                                <option value="espeak">Linux eSpeak</option>
+                                <option value="custom">自定义</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div id="pyttsx3-driver-custom-wrap" style="display:none;margin-top:12px;">
+                        <label for="pyttsx3-driver-name">自定义 driverName</label>
+                        <input id="pyttsx3-driver-name" type="text" value="" placeholder="例如：sapi5 / nsss / espeak"/>
+                    </div>
+                    <div class="grid-2" style="margin-top:12px;">
+                        <div>
+                            <label for="pyttsx3-rate">pyttsx3 语速</label>
+                            <input id="pyttsx3-rate" type="number" min="80" max="400" step="1" value="175"/>
+                        </div>
+                        <div>
+                            <label for="pyttsx3-volume">pyttsx3 音量</label>
+                            <input id="pyttsx3-volume" type="number" min="0" max="1" step="0.05" value="1.0"/>
+                        </div>
+                    </div>
                 </div>
 
-            <div class="tab-panel" data-panel="asr">
-                <div class="section-note" id="asr-model-note"></div>
-                <div class="grid-2" style="margin-top:12px;">
-                    <div>
-                        <label for="asr-device">ASR 设备</label>
-                        <input id="asr-device" type="text" value="cuda:0"/>
-                    </div>
-                    <div>
-                        <label for="asr-batch-size">ASR 批量时长 (秒)</label>
-                        <input id="asr-batch-size" type="number" min="1" step="1" value="300"/>
-                    </div>
                 </div>
-                <div class="section-note" style="margin-top:12px;">
-                    热词会传给 FunASR 热词接口，近音词会在识别结果后处理。支持空行和以 #、;、// 开头的注释行。
-                </div>
-                <div style="margin-top:12px;">
-                    <label for="asr-hotwords">热词配置</label>
-                    <textarea id="asr-hotwords" style="min-height:120px;" placeholder="每行一个热词或短语，例如：&#10;云台&#10;数字人&#10;监控"></textarea>
-                </div>
-                <div style="margin-top:12px;">
-                    <label for="asr-phonetic-replacements">近音词配置</label>
-                    <textarea id="asr-phonetic-replacements" style="min-height:120px;" placeholder="每行一个替换规则，例如：&#10;相继 => 相机&#10;运泰 => 云台"></textarea>
-                </div>
-            </div>
 
             <div class="tab-panel" data-panel="avatars">
                 <div class="section-note" id="avatar-model-note"></div>
@@ -1418,7 +1517,7 @@ function currentSessionId() {
 function ensureSession() {
     const sessionId = currentSessionId();
     if (!sessionId) {
-        updateStatus('WebRTC not connected.');
+        updateStatus('WebRTC 未连接。');
         return 0;
     }
     return sessionId;
@@ -1429,6 +1528,18 @@ async function postJson(url, payload) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
+    });
+    const result = await response.json();
+    if (!response.ok || result.code !== 0) {
+        throw new Error(result.msg || `请求失败：${response.status}`);
+    }
+    return result;
+}
+
+async function postFormData(url, formData) {
+    const response = await fetch(url, {
+        method: 'POST',
+        body: formData
     });
     const result = await response.json();
     if (!response.ok || result.code !== 0) {
@@ -1543,7 +1654,7 @@ async function loadConversationHistory() {
     try {
         result = await response.json();
     } catch (error) {
-        updateStatus(`Conversation history parse failed: ${error}`);
+        updateStatus(`对话历史解析失败：${error}`);
         return;
     }
     if (!response.ok || !result || result.code !== 0) {
@@ -1553,7 +1664,7 @@ async function loadConversationHistory() {
             updateStatus('会话已失效，正在等待 WebRTC 重连。');
             return;
         }
-        updateStatus(`Conversation history load failed: ${message}`);
+        updateStatus(`对话历史加载失败：${message}`);
         return;
     }
     renderConversation(result.data || []);
@@ -1564,16 +1675,16 @@ async function clearConversationHistory() {
     if (!sessionId) {
         return;
     }
-    updateStatus('Loading conversation history...');
+    updateStatus('正在加载对话历史...');
     const result = await postJson('/api/dialog/clear', {
         sessionid: sessionId
     });
     if (result.code === 0) {
         renderConversation([]);
-        updateStatus('Conversation history cleared.');
+        updateStatus('对话历史已清空。');
         return;
     }
-    updateStatus(`Request failed: ${result.msg}`);
+    updateStatus(`请求失败：${result.msg}`);
 }
 
 function ensureConversationPolling() {
@@ -1601,7 +1712,7 @@ function openSettingsModal() {
     const backdrop = document.getElementById('settings-backdrop');
     backdrop.classList.add('open');
     backdrop.setAttribute('aria-hidden', 'false');
-    switchSettingsTab('tts');
+    switchSettingsTab('asr');
     loadAvatarMaterials().catch((error) => {
         updateStatus(`加载素材列表失败：${error}`);
     });
@@ -2178,7 +2289,23 @@ function getSelectedAvatarId() {
 }
 
 function normalizeTtsEngine(engine) {
-    return String(engine || '').trim().toLowerCase().replace(/-/g, '_');
+    const normalized = String(engine || '').trim().toLowerCase().replace(/-/g, '_');
+    if (!normalized || normalized === 'sherpa_onnx_vits' || normalized === 'vits_zh') {
+        return 'vits_zh';
+    }
+    if (normalized === 'sherpa_onnx_vits_zh_en' || normalized === 'vits_melo_tts_zh_en' || normalized === 'sherpa_onnx_melo_tts_zh_en' || normalized === 'vits_melo_zh_en') {
+        return 'vits_melo_zh_en';
+    }
+    if (normalized === 'qwen3_tts' || normalized === 'qwen3_customvoice' || normalized === 'qwen3_tts_customvoice' || normalized === 'qwen_customvoice') {
+        return 'qwen3_customvoice';
+    }
+    if (normalized === 'coqui_tts' || normalized === 'coqui_xtts_v2' || normalized === 'xtts' || normalized === 'xtts_v2') {
+        return 'coqui_xtts_v2';
+    }
+    if (normalized === 'pyttsx3' || normalized === 'pyttsx3_tts' || normalized === 'pyttsx3_sapi5' || normalized === 'sapi5') {
+        return 'pyttsx3';
+    }
+    return normalized;
 }
 
 function normalizeLlmMode(mode) {
@@ -2203,16 +2330,47 @@ function normalizeLogLevel(level) {
     return 'INFO';
 }
 
+function normalizePyttsx3DriverMode(driverName) {
+    const normalized = String(driverName || '').trim().toLowerCase();
+    if (!normalized) {
+        return '';
+    }
+    if (normalized === 'sapi5' || normalized === 'nsss' || normalized === 'espeak') {
+        return normalized;
+    }
+    return 'custom';
+}
+
+function getPyttsx3DriverNameFromForm() {
+    const modeSelect = document.getElementById('pyttsx3-driver-mode');
+    const customInput = document.getElementById('pyttsx3-driver-name');
+    const mode = String(modeSelect ? modeSelect.value : '').trim();
+    if (mode === 'custom') {
+        return String(customInput ? customInput.value : '').trim();
+    }
+    if (mode === 'sapi5' || mode === 'nsss' || mode === 'espeak') {
+        return mode;
+    }
+    return '';
+}
+
 let ttsConfigCache = {
     vits_zh: {},
     vits_melo_zh_en: {},
-    edgetts: {}
+    qwen3_customvoice: {},
+    coqui_xtts_v2: {},
+    edgetts: {},
+    pyttsx3: {}
 };
 let ttsVoiceOptionsCache = {
     vits_zh: [],
     vits_melo_zh_en: [],
-    edgetts: []
+    qwen3_customvoice: [],
+    coqui_xtts_v2: [],
+    edgetts: [],
+    pyttsx3: []
 };
+let coquiReferenceOptionsCache = [];
 let llmConfigCache = {
     openai_chat: {},
     chat_completions_api: {},
@@ -2233,7 +2391,6 @@ function getLlmModeLabel(mode) {
 }
 
 function updateSettingsSummary(engine, llmMode, avatarId) {
-    const ttsNote = document.getElementById('tts-model-note');
     const llmNote = document.getElementById('llm-model-note');
     const avatarNote = document.getElementById('avatar-model-note');
     const currentAvatarId = String(avatarId || currentAvatarIdCache || '');
@@ -2244,10 +2401,6 @@ function updateSettingsSummary(engine, llmMode, avatarId) {
             ? Boolean(avatarSilenceGateCache[currentAvatarId])
             : Boolean(avatarItem.silence_gate_enabled))
         : false;
-
-    if (ttsNote) {
-        ttsNote.textContent = `当前 TTS：${getTtsEngineDescription(engine)}`;
-    }
     if (llmNote) {
         llmNote.textContent = `当前 LLM：${getLlmModeLabel(llmMode)}`;
     }
@@ -2292,18 +2445,100 @@ function getSherpaTtsConfig(engine) {
     return ttsConfigCache.vits_zh || {};
 }
 
+function getQwenTtsConfig() {
+    return ttsConfigCache.qwen3_customvoice || {};
+}
+
+function getCoquiTtsConfig() {
+    return ttsConfigCache.coqui_xtts_v2 || {};
+}
+
+function getCurrentCoquiReferencePath() {
+    return String((getCoquiTtsConfig() || {}).speaker_wav_path || 'data/tts/coqui_xtts_v2/reference.wav').trim();
+}
+
+function stripAudioExtension(filename) {
+    return String(filename || '').replace(/\.(wav|mp3)$/i, '');
+}
+
+function renderCoquiReferenceOptions() {
+    const select = document.getElementById('coqui-speaker-wav-select');
+    const pathInput = document.getElementById('coqui-speaker-wav-path');
+    const deleteButton = document.getElementById('coqui-delete-reference');
+    if (!select) {
+        return;
+    }
+    const currentPath = getCurrentCoquiReferencePath();
+    const options = Array.isArray(coquiReferenceOptionsCache) ? coquiReferenceOptionsCache.slice() : [];
+    if (currentPath && !options.some((item) => String(item.id || '') === currentPath)) {
+        options.unshift({
+            id: currentPath,
+            label: currentPath.endsWith('/reference.wav') ? '默认参考音频' : stripAudioExtension(currentPath.split('/').pop()),
+            desc: currentPath,
+            is_default: currentPath.endsWith('/reference.wav'),
+            is_current: true
+        });
+    }
+    select.innerHTML = options.length
+        ? options.map((item) => {
+            const labelParts = [String(item.label || item.id || '')];
+            if (item.is_default) {
+                labelParts.push('默认');
+            }
+            if (String(item.id || '') === currentPath) {
+                labelParts.push('当前');
+            }
+            return `<option value="${item.id || ''}" title="${item.desc || ''}">${labelParts.join(' · ')}</option>`;
+        }).join('')
+        : '<option value="">暂无参考音频</option>';
+    select.value = currentPath || (options[0] ? String(options[0].id || '') : '');
+    if (pathInput) {
+        pathInput.value = select.value || currentPath;
+    }
+    syncCoquiReferencePathFromSelect();
+}
+
+function syncCoquiReferencePathFromSelect() {
+    const select = document.getElementById('coqui-speaker-wav-select');
+    const pathInput = document.getElementById('coqui-speaker-wav-path');
+    const deleteButton = document.getElementById('coqui-delete-reference');
+    if (select && pathInput) {
+        pathInput.value = String(select.value || '').trim();
+    }
+    if (deleteButton && select) {
+        const selectedItem = (Array.isArray(coquiReferenceOptionsCache) ? coquiReferenceOptionsCache : [])
+            .find((item) => String(item.id || '') === String(select.value || ''));
+        deleteButton.disabled = !selectedItem || Boolean(selectedItem.is_default);
+    }
+}
+
 function applyTtsFormValues(engine) {
     const normalized = normalizeTtsEngine(engine) || 'vits_zh';
     const sherpa = (normalized === 'vits_zh' || normalized === 'vits_melo_zh_en')
         ? getSherpaTtsConfig(normalized)
         : (ttsConfigCache.vits_zh || {});
+    const qwen = getQwenTtsConfig();
+    const coqui = getCoquiTtsConfig();
     const edge = ttsConfigCache.edgetts || {};
+    const pyttsx3 = ttsConfigCache.pyttsx3 || {};
 
     const speaker = document.getElementById('tts-speaker');
     const speed = document.getElementById('tts-speed');
     const threads = document.getElementById('tts-threads');
+    const qwenSpeaker = document.getElementById('tts-qwen-speaker');
+    const qwenInstruct = document.getElementById('tts-qwen-instruct');
+    const qwenSpeed = document.getElementById('tts-qwen-speed');
+    const coquiSpeakerWavPath = document.getElementById('coqui-speaker-wav-path');
+    const coquiLanguage = document.getElementById('coqui-language');
+    const coquiDevice = document.getElementById('coqui-device');
+    const coquiSpeed = document.getElementById('coqui-speed');
     const edgeVoice = document.getElementById('edge-voice-name');
     const edgeSpeed = document.getElementById('edge-speed');
+    const pyttsx3DriverMode = document.getElementById('pyttsx3-driver-mode');
+    const pyttsx3DriverName = document.getElementById('pyttsx3-driver-name');
+    const pyttsx3Voice = document.getElementById('pyttsx3-voice-id');
+    const pyttsx3Rate = document.getElementById('pyttsx3-rate');
+    const pyttsx3Volume = document.getElementById('pyttsx3-volume');
 
     if (speaker) {
         speaker.value = String(sherpa.speaker_id ?? 4);
@@ -2314,49 +2549,139 @@ function applyTtsFormValues(engine) {
     if (threads) {
         threads.value = String(sherpa.num_threads ?? 2);
     }
+    if (qwenSpeaker) {
+        qwenSpeaker.value = String(qwen.speaker || 'Vivian');
+    }
+    if (qwenInstruct) {
+        qwenInstruct.value = qwen.instruct || '';
+    }
+    if (qwenSpeed) {
+        qwenSpeed.value = String(qwen.speed ?? 1.0);
+    }
+    if (coquiSpeakerWavPath) {
+        coquiSpeakerWavPath.value = coqui.speaker_wav_path || 'data/tts/coqui_xtts_v2/reference.wav';
+    }
+    renderCoquiReferenceOptions();
+    if (coquiLanguage) {
+        coquiLanguage.value = coqui.language || 'zh-cn';
+    }
+    if (coquiDevice) {
+        coquiDevice.value = coqui.device || 'cuda:0';
+    }
+    if (coquiSpeed) {
+        coquiSpeed.value = String(coqui.speed ?? 1.1);
+    }
     if (edgeVoice) {
         edgeVoice.value = edge.voice_name || 'zh-CN-XiaoxiaoNeural';
     }
     if (edgeSpeed) {
         edgeSpeed.value = edge.speed || '0%';
     }
+    if (pyttsx3DriverMode) {
+        pyttsx3DriverMode.value = normalizePyttsx3DriverMode(pyttsx3.driver_name);
+    }
+    if (pyttsx3DriverName) {
+        pyttsx3DriverName.value = String(pyttsx3.driver_name || '');
+    }
+    if (pyttsx3Voice) {
+        pyttsx3Voice.value = String(pyttsx3.voice_id || '');
+    }
+    if (pyttsx3Rate) {
+        pyttsx3Rate.value = String(pyttsx3.rate ?? 175);
+    }
+    if (pyttsx3Volume) {
+        pyttsx3Volume.value = String(pyttsx3.volume ?? 1.0);
+    }
+    syncPyttsx3FormState();
 }
 
 function applyTtsVoiceOptions(engine) {
     const normalized = normalizeTtsEngine(engine) || 'vits_zh';
     const speakerSelect = document.getElementById('tts-speaker');
-    if (!speakerSelect) {
-        return;
-    }
+    const qwenSpeakerSelect = document.getElementById('tts-qwen-speaker');
+    const pyttsx3VoiceSelect = document.getElementById('pyttsx3-voice-id');
     const options = Array.isArray(ttsVoiceOptionsCache[normalized]) && ttsVoiceOptionsCache[normalized].length
         ? ttsVoiceOptionsCache[normalized]
         : (Array.isArray(ttsVoiceOptionsCache.vits_zh) ? ttsVoiceOptionsCache.vits_zh : []);
-    speakerSelect.innerHTML = options.map((item) => (
-        `<option value="${item.id}">${item.label}</option>`
-    )).join('');
-    if (!options.length) {
-        speakerSelect.innerHTML = '<option value="0">默认音色</option>';
+    if (normalized === 'qwen3_customvoice') {
+        if (!qwenSpeakerSelect) {
+            return;
+        }
+        qwenSpeakerSelect.innerHTML = options.map((item) => (
+            `<option value="${item.id}">${item.label}</option>`
+        )).join('');
+        if (!options.length) {
+            qwenSpeakerSelect.innerHTML = '<option value="Vivian">Vivian</option>';
+        }
+        return;
     }
+    if (normalized === 'pyttsx3') {
+        if (pyttsx3VoiceSelect) {
+            const pyttsx3Options = Array.isArray(ttsVoiceOptionsCache.pyttsx3) ? ttsVoiceOptionsCache.pyttsx3 : [];
+            pyttsx3VoiceSelect.innerHTML = ['<option value="">系统默认音色（推荐）</option>'].concat(
+                pyttsx3Options.map((item) => `<option value="${item.id || ''}" title="${item.desc || ''}">${item.label || item.id || ''}</option>`)
+            ).join('');
+            pyttsx3VoiceSelect.value = '';
+        }
+        return;
+    }
+    if (speakerSelect) {
+        speakerSelect.innerHTML = options.map((item) => (
+            `<option value="${item.id}">${item.label}</option>`
+        )).join('');
+        if (!options.length) {
+            speakerSelect.innerHTML = '<option value="0">默认音色</option>';
+        }
+    }
+}
+
+function syncPyttsx3FormState() {
+    const modeSelect = document.getElementById('pyttsx3-driver-mode');
+    const customInput = document.getElementById('pyttsx3-driver-name');
+    const customWrap = document.getElementById('pyttsx3-driver-custom-wrap');
+    if (!modeSelect || !customWrap) {
+        return;
+    }
+    const mode = String(modeSelect.value || '').trim();
+    if (customInput) {
+        customInput.disabled = mode !== 'custom';
+    }
+    customWrap.style.display = mode === 'custom' ? '' : 'none';
 }
 
 function syncTtsPanels(engine) {
     const normalized = normalizeTtsEngine(engine) || 'vits_zh';
     const sherpaPanel = document.getElementById('tts-sherpa-panel');
+    const qwenPanel = document.getElementById('tts-qwen-panel');
+    const coquiPanel = document.getElementById('tts-coqui-panel');
     const edgePanel = document.getElementById('tts-edge-panel');
+    const pyttsx3Panel = document.getElementById('tts-pyttsx3-panel');
     if (sherpaPanel) {
         sherpaPanel.style.display = (normalized === 'vits_zh' || normalized === 'vits_melo_zh_en') ? '' : 'none';
     }
+    if (qwenPanel) {
+        qwenPanel.style.display = normalized === 'qwen3_customvoice' ? '' : 'none';
+    }
+    if (coquiPanel) {
+        coquiPanel.style.display = normalized === 'coqui_xtts_v2' ? '' : 'none';
+    }
     if (edgePanel) {
         edgePanel.style.display = normalized === 'edgetts' ? '' : 'none';
+    }
+    if (pyttsx3Panel) {
+        pyttsx3Panel.style.display = normalized === 'pyttsx3' ? '' : 'none';
     }
 }
 
 function getTtsEngineDescription(engine) {
     const normalized = normalizeTtsEngine(engine) || 'vits_zh';
     const descriptions = {
-        vits_zh: 'Local Chinese TTS, model k2-fsa/sherpa-onnx-vits-zh-ll.',
-        vits_melo_zh_en: 'Local zh/en TTS, model vits-melo-tts-zh_en.',
-        edgetts: 'Online TTS for English words and mixed zh/en speech.'
+        pyttsx3: '名称：pyttsx3；支持语言：取决于本机系统语音；CPU/GPU：CPU；是否联网：否；特殊注意点：默认使用系统音色，driverName 留空为自动，voice_id 仅在本机已安装语音时有效。',
+        edgetts: '名称：Microsoft Edge TTS；支持语言：多语言语音；CPU/GPU：CPU；是否联网：是；特殊注意点：需要可访问微软在线服务，语速使用百分比字符串。',
+        vits_zh: '名称：Sherpa-ONNX VITS 中文；支持语言：中文；CPU/GPU：GPU 优先，CPU 可运行但不推荐；是否联网：否；特殊注意点：默认使用 CUDA provider，模型文件位于项目内，适合离线运行。',
+        vits_melo_zh_en: '名称：Sherpa-ONNX Melo zh/en；支持语言：中文 / 英文；CPU/GPU：GPU 优先，CPU 可运行但不推荐；是否联网：否；特殊注意点：默认使用 CUDA provider，模型文件位于项目内，适合离线运行。',
+        qwen3_customvoice: '名称：Qwen3-TTS CustomVoice；支持语言：中文 / 英文 / 日文 / 韩文；CPU/GPU：高性能GPU推荐，CPU 可运行但较慢；是否联网：否；特殊注意点：需要项目内模型与 tokenizer。',
+        coqui_xtts_v2: '名称：Coqui XTTS v2；支持语言：多语言语音克隆，当前界面开放中文 / 英文；CPU/GPU：高性能GPU推荐，CPU 可运行但较慢；是否联网：否；特殊注意点：需要项目内模型和参考音频，支持可调语速。'
     };
     return descriptions[normalized] || normalized;
 }
@@ -2393,7 +2718,10 @@ async function loadSettings() {
     const data = result.data || {};
     const tts = (((data.tts || {}).vits_zh) || {});
     const ttsZhEn = (((data.tts || {}).vits_melo_zh_en) || {});
+    const qwen = (((data.tts || {}).qwen3_customvoice) || {});
+    const coqui = (((data.tts || {}).coqui_xtts_v2) || {});
     const edge = (((data.tts || {}).edgetts) || {});
+    const pyttsx3 = (((data.tts || {}).pyttsx3) || {});
     const asr = (((data.asr || {}).paraformer) || {});
     const runtime = data.runtime || {};
     const llmPayload = data.llm || {};
@@ -2401,12 +2729,16 @@ async function loadSettings() {
     const meta = data.meta || {};
     const voiceOptions = Array.isArray(meta.tts_voice_options) ? meta.tts_voice_options : [];
     const voiceOptionsByEngine = meta.tts_voice_options_by_engine || {};
+    const coquiReferenceOptions = Array.isArray(meta.coqui_reference_options) ? meta.coqui_reference_options : [];
     const engineOptions = Array.isArray(meta.tts_engine_options) && meta.tts_engine_options.length
         ? meta.tts_engine_options
         : [
-            { id: 'vits_zh', label: 'vits-zh', desc: '本地中文 TTS。' },
-            { id: 'vits_melo_zh_en', label: 'vits-melo-zh_en', desc: '本地中英 TTS。' },
-            { id: 'edgetts', label: 'EdgeTTS', desc: '在线 TTS。' }
+            { id: 'pyttsx3', label: 'pyttsx3', desc: '名称：pyttsx3；支持语言：取决于本机系统语音；CPU/GPU：CPU；是否联网：否；特殊注意点：默认使用系统音色，driverName 留空为自动，voice_id 仅在本机已安装语音时有效。' },
+            { id: 'edgetts', label: 'EdgeTTS', desc: '名称：Microsoft Edge TTS；支持语言：多语言语音；CPU/GPU：CPU；是否联网：是；特殊注意点：需要可访问微软在线服务，语速使用百分比字符串。' },
+            { id: 'vits_zh', label: 'vits-zh', desc: '名称：Sherpa-ONNX VITS 中文；支持语言：中文；CPU/GPU：GPU 优先，CPU 可运行但不推荐；是否联网：否；特殊注意点：默认使用 CUDA provider，模型文件位于项目内，适合离线运行。' },
+            { id: 'vits_melo_zh_en', label: 'vits-melo-zh_en', desc: '名称：Sherpa-ONNX Melo zh/en；支持语言：中文 / 英文；CPU/GPU：GPU 优先，CPU 可运行但不推荐；是否联网：否；特殊注意点：默认使用 CUDA provider，模型文件位于项目内，适合离线运行。' },
+            { id: 'qwen3_customvoice', label: 'Qwen3-TTS CustomVoice', desc: '名称：Qwen3-TTS CustomVoice；支持语言：中文 / 英文 / 日文 / 韩文；CPU/GPU：高性能GPU推荐，CPU 可运行但较慢；是否联网：否；特殊注意点：需要项目内模型与 tokenizer。' },
+            { id: 'coqui_xtts_v2', label: 'Coqui XTTS v2', desc: '名称：Coqui XTTS v2；支持语言：多语言语音克隆，当前界面开放中文 / 英文；CPU/GPU：高性能GPU推荐，CPU 可运行但较慢；是否联网：否；特殊注意点：需要项目内模型和参考音频，支持可调语速。' }
         ];
     const llmModeOptions = Array.isArray(meta.llm_mode_options) && meta.llm_mode_options.length
         ? meta.llm_mode_options
@@ -2422,13 +2754,20 @@ async function loadSettings() {
     ttsConfigCache = {
         vits_zh: tts,
         vits_melo_zh_en: ttsZhEn,
-        edgetts: edge
+        qwen3_customvoice: qwen,
+        coqui_xtts_v2: coqui,
+        edgetts: edge,
+        pyttsx3: pyttsx3
     };
     ttsVoiceOptionsCache = {
         vits_zh: Array.isArray(voiceOptionsByEngine.vits_zh) ? voiceOptionsByEngine.vits_zh : voiceOptions,
         vits_melo_zh_en: Array.isArray(voiceOptionsByEngine.vits_melo_zh_en) ? voiceOptionsByEngine.vits_melo_zh_en : [],
-        edgetts: Array.isArray(voiceOptionsByEngine.edgetts) ? voiceOptionsByEngine.edgetts : []
+        qwen3_customvoice: Array.isArray(voiceOptionsByEngine.qwen3_customvoice) ? voiceOptionsByEngine.qwen3_customvoice : [],
+        coqui_xtts_v2: Array.isArray(voiceOptionsByEngine.coqui_xtts_v2) ? voiceOptionsByEngine.coqui_xtts_v2 : [],
+        edgetts: Array.isArray(voiceOptionsByEngine.edgetts) ? voiceOptionsByEngine.edgetts : [],
+        pyttsx3: Array.isArray(voiceOptionsByEngine.pyttsx3) ? voiceOptionsByEngine.pyttsx3 : []
     };
+    coquiReferenceOptionsCache = coquiReferenceOptions;
     llmModeOptionsCache = llmModeOptions;
     avatarOptionsCache = avatarOptions;
     currentAvatarIdCache = String(meta.current_avatar_id || (avatarOptions[0] && avatarOptions[0].id) || '');
@@ -2471,8 +2810,6 @@ async function loadSettings() {
     }
 
     document.getElementById('tts-engine').value = currentEngine;
-    applyTtsVoiceOptions(currentEngine);
-    applyTtsFormValues(currentEngine);
     if (llmSelect) {
         llmSelect.value = currentLlmMode;
         llmSelect.dataset.currentMode = currentLlmMode;
@@ -2486,6 +2823,9 @@ async function loadSettings() {
     if (runtimeLogLevelSelect) {
         runtimeLogLevelSelect.value = runtimeConfigCache.log_level;
     }
+    syncTtsPanels(currentEngine);
+    applyTtsVoiceOptions(currentEngine);
+    applyTtsFormValues(currentEngine);
     updateSettingsSummary(currentEngine, currentLlmMode, currentAvatarIdCache);
 }
 async function saveSettings(options = {}) {
@@ -2520,9 +2860,27 @@ async function saveSettings(options = {}) {
         avatar_id: selectedAvatarId,
         avatar_silence_gate_by_avatar: avatarSilenceGateByAvatar,
         tts: {
+            qwen3_customvoice: {
+                speaker: document.getElementById('tts-qwen-speaker').value,
+                instruct: document.getElementById('tts-qwen-instruct').value.trim(),
+                speed: parseFloat(document.getElementById('tts-qwen-speed').value),
+                language: 'Auto'
+            },
+            coqui_xtts_v2: {
+                speaker_wav_path: document.getElementById('coqui-speaker-wav-path').value.trim(),
+                language: document.getElementById('coqui-language').value,
+                device: document.getElementById('coqui-device').value.trim(),
+                speed: parseFloat(document.getElementById('coqui-speed').value)
+            },
             edgetts: {
                 voice_name: document.getElementById('edge-voice-name').value.trim(),
                 speed: document.getElementById('edge-speed').value.trim()
+            },
+            pyttsx3: {
+                voice_id: document.getElementById('pyttsx3-voice-id').value,
+                driver_name: getPyttsx3DriverNameFromForm(),
+                rate: parseInt(document.getElementById('pyttsx3-rate').value, 10),
+                volume: parseFloat(document.getElementById('pyttsx3-volume').value),
             }
         },
         asr: {
@@ -2538,13 +2896,34 @@ async function saveSettings(options = {}) {
         }
     };
 
-    if (selectedEngine === 'vits_zh' || selectedEngine === 'vits_melo_zh_en') {
+        if (selectedEngine === 'vits_zh' || selectedEngine === 'vits_melo_zh_en') {
         payload.tts[selectedEngine] = {
             speaker_id: parseInt(document.getElementById('tts-speaker').value, 10),
             speed: parseFloat(document.getElementById('tts-speed').value),
             num_threads: parseInt(document.getElementById('tts-threads').value, 10),
-            provider: 'cpu'
+            provider: 'cuda'
         };
+    } else if (selectedEngine === 'qwen3_customvoice') {
+        payload.tts.qwen3_customvoice = Object.assign({}, ttsConfigCache.qwen3_customvoice || {}, {
+            speaker: document.getElementById('tts-qwen-speaker').value,
+            instruct: document.getElementById('tts-qwen-instruct').value.trim(),
+            speed: parseFloat(document.getElementById('tts-qwen-speed').value),
+            language: 'Auto'
+        });
+    } else if (selectedEngine === 'coqui_xtts_v2') {
+        payload.tts.coqui_xtts_v2 = Object.assign({}, ttsConfigCache.coqui_xtts_v2 || {}, {
+            speaker_wav_path: document.getElementById('coqui-speaker-wav-path').value.trim(),
+            language: document.getElementById('coqui-language').value,
+            device: document.getElementById('coqui-device').value.trim(),
+            speed: parseFloat(document.getElementById('coqui-speed').value)
+        });
+    } else if (selectedEngine === 'pyttsx3') {
+        payload.tts.pyttsx3 = Object.assign({}, ttsConfigCache.pyttsx3 || {}, {
+            voice_id: document.getElementById('pyttsx3-voice-id').value,
+            driver_name: getPyttsx3DriverNameFromForm(),
+            rate: parseInt(document.getElementById('pyttsx3-rate').value, 10),
+            volume: parseFloat(document.getElementById('pyttsx3-volume').value)
+        });
     }
 
     const avatarChanged = selectedAvatarId && selectedAvatarId !== currentAvatarIdCache;
@@ -2552,19 +2931,22 @@ async function saveSettings(options = {}) {
         openAvatarSwitchModal(selectedAvatarId);
     }
 
-    updateStatus('Saving settings...');
+    updateStatus('正在保存设置...');
     try {
         const result = await postJson('/api/runtime/config', payload);
         if (avatarChanged && options.showAvatarSwitchProgress !== false) {
             completeAvatarSwitchModal(true, `Avatar ${selectedAvatarId} 切换完成。`);
         }
-        updateStatus(result.code === 0 ? 'Settings saved.' : `Save failed: ${result.msg}`);
+        updateStatus(result.code === 0 ? '设置已保存。' : `保存失败：${result.msg}`);
         if (result.code === 0 && result.data) {
             const savedData = result.data || {};
             ttsConfigCache = {
                 vits_zh: (((savedData.tts || {}).vits_zh) || {}),
                 vits_melo_zh_en: (((savedData.tts || {}).vits_melo_zh_en) || {}),
-                edgetts: (((savedData.tts || {}).edgetts) || {})
+                qwen3_customvoice: (((savedData.tts || {}).qwen3_customvoice) || {}),
+                coqui_xtts_v2: (((savedData.tts || {}).coqui_xtts_v2) || {}),
+                edgetts: (((savedData.tts || {}).edgetts) || {}),
+                pyttsx3: (((savedData.tts || {}).pyttsx3) || {})
             };
             llmConfigCache = {
                 openai_chat: (((savedData.llm || {}).openai_chat) || llmConfigCache.openai_chat || {}),
@@ -2572,6 +2954,7 @@ async function saveSettings(options = {}) {
                 lm_studio_api: (((savedData.llm || {}).lm_studio_api) || llmConfigCache.lm_studio_api || {})
             };
             const savedMeta = savedData.meta || {};
+            coquiReferenceOptionsCache = Array.isArray(savedMeta.coqui_reference_options) ? savedMeta.coqui_reference_options : coquiReferenceOptionsCache;
             currentAvatarIdCache = String(savedMeta.current_avatar_id || selectedAvatarId || currentAvatarIdCache || '');
             const savedAvatarOptions = Array.isArray(savedMeta.avatar_options) ? savedMeta.avatar_options : [];
             avatarSilenceGateCache = {};
@@ -2603,11 +2986,11 @@ async function sendChatText(text) {
 
     const content = (text || '').trim();
     if (!content) {
-        updateStatus('Please input text or finish ASR first.');
+        updateStatus('请先输入文本或完成 ASR。');
         return;
     }
 
-    updateStatus('Sending to LLM...');
+    updateStatus('正在发送到 LLM...');
     const result = await postJson('/human', {
         text: content,
         type: 'chat',
@@ -2616,7 +2999,7 @@ async function sendChatText(text) {
         skip_dialog_log: true,
         continuous_dialogue: continuousDialogueEnabled
     });
-    updateStatus(result.code === 0 ? 'Sent to LLM.' : `Send failed: ${result.msg}`);
+    updateStatus(result.code === 0 ? '已发送到 LLM。' : `发送失败：${result.msg}`);
     await loadConversationHistory();
 }
 
@@ -2655,8 +3038,8 @@ async function transcribeBlob(blob, filename) {
     const asrElapsed = ((performance.now() - asrStart) / 1000).toFixed(2);
     pendingInputMeta = text ? { asr_elapsed: asrElapsed } : {};
     updateStatus(text
-        ? `ASR complete in ${asrElapsed}s. Text has been filled into the input box, please click send.`
-        : `ASR complete in ${asrElapsed}s, but nothing was recognized.`);
+        ? `ASR 完成，用时 ${asrElapsed} 秒。文本已填入输入框，请点击发送。`
+        : `ASR 完成，用时 ${asrElapsed} 秒，但未识别到内容。`);
 }
 
 async function startMicRecording() {
@@ -2680,7 +3063,7 @@ async function startMicRecording() {
     isRecording = true;
     const holdToTalkButton = document.getElementById('hold-to-talk');
     holdToTalkButton.classList.add('recording');
-    holdToTalkButton.textContent = 'Release to transcribe';
+    holdToTalkButton.setAttribute('aria-pressed', 'true');
 
     mediaRecorder.ondataavailable = (event) => {
         if (event.data && event.data.size > 0) {
@@ -2693,7 +3076,7 @@ async function startMicRecording() {
             const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
             await transcribeBlob(blob, 'recording.webm');
         } catch (error) {
-            updateStatus(`ASR failed: ${error}`);
+            updateStatus(`ASR 失败：${error}`);
         } finally {
             if (mediaStream) {
                 mediaStream.getTracks().forEach((track) => track.stop());
@@ -2702,12 +3085,12 @@ async function startMicRecording() {
             mediaStream = null;
             recordedChunks = [];
             holdToTalkButton.classList.remove('recording');
-            holdToTalkButton.textContent = 'Hold to talk';
+            holdToTalkButton.setAttribute('aria-pressed', 'false');
         }
     };
 
     mediaRecorder.start();
-    updateStatus('Recording started. Release to transcribe.');
+    updateStatus('开始录音，松开后自动识别。');
 }
 function stopMicRecording() {
     if (mediaRecorder && mediaRecorder.state !== 'inactive') {
@@ -2722,13 +3105,89 @@ async function uploadAudioFile() {
 
     const input = document.getElementById('audio-file');
     if (!input.files || !input.files.length) {
-        updateStatus('Please choose an audio file first.');
+        updateStatus('请先选择音频文件。');
         return;
     }
 
     const file = input.files[0];
     await transcribeBlob(file, file.name || 'upload-audio');
     input.value = '';
+}
+
+async function uploadCoquiReferenceWav() {
+    const input = document.getElementById('coqui-speaker-wav-file');
+    if (!input || !input.files || !input.files.length) {
+        return;
+    }
+
+    const file = input.files[0];
+    const form = new FormData();
+    form.append('file', file, file.name || 'reference.mp3');
+
+    updateStatus('正在上传 Coqui XTTS 参考音频（mp3）...');
+    try {
+        const result = await postFormData('/api/tts/coqui/reference-wav', form);
+        const speakerWavPath = (((result.data || {}).speaker_wav_path) || '').trim();
+        const referenceOptions = Array.isArray((result.data || {}).reference_options) ? (result.data || {}).reference_options : [];
+        const pathInput = document.getElementById('coqui-speaker-wav-path');
+        if (pathInput) {
+            pathInput.value = speakerWavPath;
+        }
+        ttsConfigCache.coqui_xtts_v2 = Object.assign({}, ttsConfigCache.coqui_xtts_v2 || {}, {
+            speaker_wav_path: speakerWavPath
+        });
+        coquiReferenceOptionsCache = referenceOptions;
+        renderCoquiReferenceOptions();
+        updateStatus(speakerWavPath ? `Coqui 参考音频已保存：${speakerWavPath}` : 'Coqui 参考音频已保存。');
+    } finally {
+        input.value = '';
+    }
+}
+
+async function selectCoquiReferenceWav() {
+    const select = document.getElementById('coqui-speaker-wav-select');
+    if (!select || !String(select.value || '').trim()) {
+        updateStatus('请先选择 Coqui 参考音频。');
+        return;
+    }
+    const speakerWavPath = String(select.value || '').trim();
+    updateStatus('正在切换 Coqui 当前参考音频...');
+    const result = await postJson('/api/tts/coqui/reference-wav/select', {
+        speaker_wav_path: speakerWavPath
+    });
+    const currentPath = String(((result.data || {}).speaker_wav_path) || speakerWavPath).trim();
+    coquiReferenceOptionsCache = Array.isArray((result.data || {}).reference_options) ? (result.data || {}).reference_options : coquiReferenceOptionsCache;
+    ttsConfigCache.coqui_xtts_v2 = Object.assign({}, ttsConfigCache.coqui_xtts_v2 || {}, {
+        speaker_wav_path: currentPath
+    });
+    renderCoquiReferenceOptions();
+    updateStatus(`Coqui 当前参考音频已切换：${currentPath}`);
+}
+
+async function deleteCoquiReferenceWav() {
+    const select = document.getElementById('coqui-speaker-wav-select');
+    if (!select || !String(select.value || '').trim()) {
+        updateStatus('请先选择要删除的 Coqui 参考音频。');
+        return;
+    }
+    const speakerWavPath = String(select.value || '').trim();
+    const target = (Array.isArray(coquiReferenceOptionsCache) ? coquiReferenceOptionsCache : [])
+        .find((item) => String(item.id || '') === speakerWavPath);
+    if (target && target.is_default) {
+        updateStatus('默认参考音频不能删除。');
+        return;
+    }
+    updateStatus('正在删除 Coqui 参考音频...');
+    const result = await postJson('/api/tts/coqui/reference-wav/delete', {
+        speaker_wav_path: speakerWavPath
+    });
+    const currentPath = String(((result.data || {}).speaker_wav_path) || '').trim();
+    coquiReferenceOptionsCache = Array.isArray((result.data || {}).reference_options) ? (result.data || {}).reference_options : [];
+    ttsConfigCache.coqui_xtts_v2 = Object.assign({}, ttsConfigCache.coqui_xtts_v2 || {}, {
+        speaker_wav_path: currentPath
+    });
+    renderCoquiReferenceOptions();
+    updateStatus(currentPath ? `Coqui 参考音频已删除，当前使用：${currentPath}` : 'Coqui 参考音频已删除。');
 }
 
 const messageInput = document.getElementById('message');
@@ -2824,7 +3283,7 @@ if (dismissAvatarSwitchButton) {
         closeAvatarSwitchModal(true);
     });
 }
-    const ttsEngineSelect = document.getElementById('tts-engine');
+const ttsEngineSelect = document.getElementById('tts-engine');
     if (ttsEngineSelect) {
         ttsEngineSelect.addEventListener('change', () => {
             const selected = ttsEngineSelect.value;
@@ -2834,15 +3293,56 @@ if (dismissAvatarSwitchButton) {
             const options = Array.from(ttsEngineSelect.options || []);
             const current = options.find((item) => item.value === selected);
             const descNode = document.getElementById('tts-engine-desc');
-            const noteNode = document.getElementById('tts-model-note');
             if (descNode) {
                 descNode.textContent = current ? current.title : "";
             }
-            if (noteNode) {
-                noteNode.textContent = `当前 TTS：${getTtsEngineDescription(selected)}`;
-            }
         });
     }
+const pyttsx3DriverModeSelect = document.getElementById('pyttsx3-driver-mode');
+if (pyttsx3DriverModeSelect) {
+    pyttsx3DriverModeSelect.addEventListener('change', () => {
+        syncPyttsx3FormState();
+    });
+}
+const pyttsx3DriverNameInput = document.getElementById('pyttsx3-driver-name');
+if (pyttsx3DriverNameInput) {
+    pyttsx3DriverNameInput.addEventListener('input', () => {
+        if (pyttsx3DriverModeSelect && String(pyttsx3DriverModeSelect.value || '') !== 'custom') {
+            pyttsx3DriverModeSelect.value = 'custom';
+            syncPyttsx3FormState();
+        }
+    });
+}
+const coquiSpeakerWavFileInput = document.getElementById('coqui-speaker-wav-file');
+if (coquiSpeakerWavFileInput) {
+    coquiSpeakerWavFileInput.addEventListener('change', () => {
+        uploadCoquiReferenceWav().catch((error) => {
+            updateStatus(`Coqui 参考音频上传失败：${error}`);
+        });
+    });
+}
+const coquiSpeakerWavSelect = document.getElementById('coqui-speaker-wav-select');
+if (coquiSpeakerWavSelect) {
+    coquiSpeakerWavSelect.addEventListener('change', () => {
+        syncCoquiReferencePathFromSelect();
+    });
+}
+const coquiSelectReferenceButton = document.getElementById('coqui-select-reference');
+if (coquiSelectReferenceButton) {
+    coquiSelectReferenceButton.addEventListener('click', () => {
+        selectCoquiReferenceWav().catch((error) => {
+            updateStatus(`Coqui 参考音频切换失败：${error}`);
+        });
+    });
+}
+const coquiDeleteReferenceButton = document.getElementById('coqui-delete-reference');
+if (coquiDeleteReferenceButton) {
+    coquiDeleteReferenceButton.addEventListener('click', () => {
+        deleteCoquiReferenceWav().catch((error) => {
+            updateStatus(`Coqui 参考音频删除失败：${error}`);
+        });
+    });
+}
 const holdToTalkButton = document.getElementById('hold-to-talk');
 const audioFileInput = document.getElementById('audio-file');
 document.getElementById('pick-audio').addEventListener('click', () => {
@@ -2854,12 +3354,17 @@ audioFileInput.addEventListener('change', async () => {
 holdToTalkButton.addEventListener('pointerdown', async (event) => {
     event.preventDefault();
     try {
+        holdToTalkButton.setPointerCapture(event.pointerId);
+    } catch (captureError) {
+        // Ignore capture failures and fall back to regular pointer events.
+    }
+    try {
         await startMicRecording();
     } catch (error) {
         updateStatus(`启动录音失败：${error}`);
     }
 });
-['pointerup', 'pointercancel', 'lostpointercapture', 'pointerleave'].forEach((eventName) => {
+['pointerup', 'pointercancel', 'lostpointercapture'].forEach((eventName) => {
     holdToTalkButton.addEventListener(eventName, () => {
         if (isRecording) {
             stopMicRecording();
@@ -2894,34 +3399,34 @@ window.addEventListener('livetalking:connectionstate', function (event) {
     var state = detail.state || 'unknown';
 
     if (state === 'ready' || state === 'connected') {
-        setConnectionBadge('Connected');
-        setConnectionStatus('WebRTC connected. You can record, upload audio, or type text.');
+        setConnectionBadge('已连接');
+        setConnectionStatus('WebRTC 已连接，可录音、上传音频或输入文本。');
         updateStatus('WebRTC 已连接。');
         return;
     }
 
     if (state === 'negotiating' || state === 'starting' || state === 'connecting' || state === 'ice-checking') {
-        setConnectionBadge('Connecting');
-        setConnectionStatus('WebRTC connecting...');
-        updateStatus('WebRTC connecting...');
+        setConnectionBadge('连接中');
+        setConnectionStatus('WebRTC 连接中...');
+        updateStatus('WebRTC 连接中...');
         return;
     }
 
     if (state === 'stopped' || state === 'closed' || state === 'disconnected' || state === 'ice-disconnected') {
-        setConnectionBadge('Disconnected');
-        setConnectionStatus('WebRTC disconnected. Refresh the page or wait for reconnect.');
-        updateStatus('WebRTC disconnected. Refresh the page or wait for reconnect.');
+        setConnectionBadge('未连接');
+        setConnectionStatus('WebRTC 已断开，请刷新页面或等待重连。');
+        updateStatus('WebRTC 已断开，请刷新页面或等待重连。');
         return;
     }
 
     if (state === 'failed' || state === 'error' || state === 'ice-failed') {
-        setConnectionBadge('Failed');
-        setConnectionStatus('WebRTC connection failed. Check browser console and server logs.');
-        updateStatus('WebRTC connection failed. Check browser console and server logs.');
+        setConnectionBadge('失败');
+        setConnectionStatus('WebRTC 连接失败，请检查浏览器控制台和服务端日志。');
+        updateStatus('WebRTC 连接失败，请检查浏览器控制台和服务端日志。');
     }
 });
 
-loadSettings().catch((error) => updateStatus(`Load settings failed: ${error}`));
+loadSettings().catch((error) => updateStatus(`加载设置失败：${error}`));
 loadConversationHistory().catch(() => {});
 ensureConversationPolling();
 setTimeout(autoStartWebRTC, 0);

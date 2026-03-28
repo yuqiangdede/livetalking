@@ -139,10 +139,9 @@ class PlayerStreamTrack(MediaStreamTrack):
             self.totaltime += (time.perf_counter() - self.lasttime)
             self.framecount += 1
             self.lasttime = time.perf_counter()
-            if self.framecount==100:
-                mylogger.info(f"------actual avg final fps:{self.framecount/self.totaltime:.4f}")
+            if self.framecount == 100:
                 self.framecount = 0
-                self.totaltime=0
+                self.totaltime = 0
         return frame
     
     def stop(self):
